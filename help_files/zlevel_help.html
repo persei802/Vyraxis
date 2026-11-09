@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Z Level Compensation</title>
+  <link href="help.css" rel="stylesheet">
+</head>
+<body>
+<h2>Z LEVEL COMP UTILITY</h2>
+<p>QtDragon can compensate for Z level height changes using it's own gcode generation code for probing. 
+An external program like G-code Ripper is not required, but can be used if so desired.</p>
+<p>Z level compensation is a bed levelling/distortion correction function typically used in 3D printing or engraving.
+It uses a HAL non-realtime component which utilizes the external offsets feature of LinuxCNC.</p>
+<p>Whenever a gcode program is loaded:</p>
+<ul>
+    <li>zlevel determines the currently loaded program file and looks for a related probe result file</li>
+    <li>for example, if <i>some_file.ngc</i> is loaded, it looks for a file called <i>probe_some_file.txt</i></li>
+    <li>if it exists, the data is read and sent to the compensation module via a shared memory structure</li>
+    <li>a surface map is created and displayed in the zlevel module</li>
+    <li>if the COMP ENABLE button is checked, the compensation module sends offset data to the Z axis</li>
+</ul>
+
+<h3>Creating a Probe File</h3>
+<ul>
+    <li>from the FILE page, load the gcode program which needs to be level compensated</li>
+    <li>the X and Y dimensions are automatically calculated and shown in the parameter frame in the X and Y size fields</li>
+    <li>enter the number of desired probe points for each axis</li>
+    <li>ensure that the selected zero reference point is the same as that of the gcode program</li>
+    <li>before a program is saved or sent to linuxcnc, the input parameters are checked for errors</li>
+    <li>any errors that are found are highlighted with a red border</li>
+</ul>
+<button>SAVE PROGRAM</button>
+<p>The input data parameters are checked and if found valid, a dialog box prompts for a save filename. The probe program is calculated
+and saved to the specified filename. If the returned save file name doesn't start with 'probe_', it is added. 
+When the file is loaded and run, it will produce a file with the same name but ending with <i>.txt</i>. This is the compensation
+data file and contains the XY probe coordinates and the Z level at that location.</p>
+<h3>Surface Map</h3>
+<p>When a gcode program is loaded into linuxcnc, this module checks for a file of the same name
+prefixed with <i>probe_</i>. If found, the data is analyzed and a reference plane is calculated using
+a least squares algorithm. The reference plane is used to create a compensation map which is sent to
+the compensation subprogram via a shared memory structure and also to create a graphical surface map.
+The probed points and contour lines are overlayed on the surface map. Clicking on one of the points
+will show that points location and the probed Z value as well as the compensation amount that will be
+applied if Z Compensation is enabled.</p>
+<h3>Sample postgui HAL file for combined spindle raise and Z Level compensation</h3>
+<div class="code-block">
+    <pre class="hal"># load a summing component for adding spindle lift and Z compensation</pre>
+    <pre class="hal">loadrt scaled_s32_sums</pre>
+    <pre class="hal">addf scaled-s32-sums.0 servo-thread</pre>
+    <pre class="hal"> </pre>
+    <pre class="hal">loadusr -Wn compensate python3 lib/compensate.py</pre>
+    <pre class="hal"> </pre>
+    <pre class="hal"># Z level compensation</pre>
+    <pre class="hal">net compensate-on    compensate.enable <= zlevel.enable</pre>
+    <pre class="hal">setp compensate.scale 1000</pre>
+    <pre class="hal"> </pre>
+    <pre class="hal"># add Z level and scaled spindle raise level values together</pre>
+    <pre class="hal">net eoffset-count    scaled-s32-sums.0.in0   <= qtdragon.eoffset-count</pre>
+    <pre class="hal">net comp-count       scaled-s32-sums.0.in1   => compensate.counts</pre>
+    <pre class="hal">net zaxis-eoffset    scaled-s32-sums.0.out-s => axis.z.eoffset-counts</pre>
+    <pre class="hal">setp scaled-s32-sums.0.scale0 1000</pre>
+    <pre class="hal">setp axis.z.eoffset-enable True</pre>
+    <pre class="hal">setp axis.z.eoffset-scale 0.001</pre>
+</div>
+</body>
+</html>

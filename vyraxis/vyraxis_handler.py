@@ -1,0 +1,2051 @@
+# Copyright (c) 2020 Jim Sloot (persei802@gmail.com)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+import os
+import threading
+import datetime
+import linuxcnc
+from send2trash import send2trash
+from connections import Connections
+from lib.event_filter import EventFilter
+
+from qtpy import uic
+from qtpy.QtCore import QObject, QEvent, QSize, QRegExp, QTimer, Qt, QUrl, QPropertyAnimation, QEasingCurve, Signal, Slot
+from qtpy.QtGui import QSyntaxHighlighter, QTextCharFormat, QIntValidator, QRegExpValidator, QFont, QColor, QIcon, QPixmap
+from qtpy.QtWidgets import QWidget, QCheckBox, QLineEdit, QStyle, QDialog, QMenu, QAction, QToolButton, QApplication
+
+from qtvcp.widgets.gcode_editor import GcodeEditor, GcodeEditor as GCODE
+from qtvcp.widgets.mdi_history import MDIHistory as MDI_WIDGET
+from qtvcp.widgets.tool_offsetview import ToolOffsetView as TOOL_TABLE
+from qtvcp.widgets.origin_offsetview import OriginOffsetView as OFFSET_VIEW
+from qtvcp.widgets.stylesheeteditor import  StyleSheetEditor as SSE
+from qtvcp.widgets.file_manager import FileManager as FM
+from qtvcp.lib.keybindings import Keylookup
+from qtvcp.core import Status, Action, Info, Path, Tool, Qhal
+from qtvcp import logger
+
+LOG = logger.getLogger(__name__)
+LOG.setLevel(logger.INFO) # One of DEBUG, INFO, WARNING, ERROR, CRITICAL
+KEYBIND = Keylookup()
+STATUS = Status()
+INFO = Info()
+ACTION = Action()
+TOOL = Tool()
+PATH = Path()
+QHAL = Qhal()
+HELP = os.path.join(PATH.CONFIGPATH, "help_files")
+IMAGES = os.path.join(PATH.HANDLERDIR, 'images')
+STYLES = os.path.join(PATH.HANDLERDIR, 'style_rc')
+VERSION = '1.0.0'
+
+# constants for main pages
+TAB_MAIN = 0
+TAB_FILE = 1
+TAB_OFFSETS = 2
+TAB_TOOL = 3
+TAB_STATUS = 4
+TAB_PROBE = 5
+TAB_CAMVIEW = 6
+TAB_SETTINGS = 7
+TAB_UTILS = 8
+TAB_ABOUT = 9
+
+# status message alert levels
+DEFAULT =  0
+WARNING =  1
+ERROR = 2
+WARNING_COLOR = "yellow"
+ERROR_COLOR = "red"
+
+RUN_COLOR = '#00FF00'
+PAUSE_COLOR = '#FFFF00'
+STOP_COLOR = '#FF0000'
+
+
+class Highlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super(Highlighter, self).__init__(document)
+        self.highlightingRules = []
+
+        warningLineFormat = QTextCharFormat()
+        warningLineFormat.setForeground(QColor(WARNING_COLOR))
+        errorLineFormat = QTextCharFormat()
+        errorLineFormat.setForeground(QColor(ERROR_COLOR))
+
+        warningLinePattern = QRegExp(".*WARNING.*")
+        errorLinePattern = QRegExp(".*ERROR.*")
+        self.highlightingRules.append((warningLinePattern, warningLineFormat))
+        self.highlightingRules.append((errorLinePattern, errorLineFormat))
+
+    def highlightBlock(self, text):
+        for pattern, format in self.highlightingRules:
+            expression = QRegExp(pattern)
+            index = expression.indexIn(text)
+            while index >= 0:
+                length = expression.matchedLength()
+                self.setFormat(index, length, format)
+                index = expression.indexIn(text, index + length)
+
+
+class MDIPanel(QDialog):
+    def __init__(self, parent=None):
+        super(MDIPanel, self).__init__()
+        self.parent = parent
+        self.w = parent.w
+        # Load the mdi_panel UI file:
+        fname = os.path.join(PATH.CONFIGPATH, 'lib/mdi_panel.ui')
+        try:
+            self.instance = uic.loadUi(fname, self)
+        except AttributeError as e:
+            self.parent.add_status(str(e), WARNING)
+        self.setWindowFlags(
+            Qt.Dialog |
+            Qt.WindowTitleHint |
+            Qt.WindowCloseButtonHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.CustomizeWindowHint)
+        self.mdiLine = self.w.mdihistory.MDILine
+        # signal connections
+        self.mdi_buttonGroup.buttonClicked.connect(self.handle_keys)
+        self.btn_mdi_back.pressed.connect(lambda: self.mdiLine.backspace())
+        self.btn_mdi_clear.pressed.connect(lambda: self.mdiLine.clear())
+        self.btn_mdi_line_up.pressed.connect(lambda: self.w.mdihistory.line_up())        
+        self.btn_mdi_line_down.pressed.connect(lambda: self.w.mdihistory.line_down())        
+        self.btn_mdi_left.pressed.connect(lambda: self.mdiLine.cursorBackward(False))
+        self.btn_mdi_right.pressed.connect(lambda: self.mdiLine.cursorForward(False))
+
+    def handle_keys(self, button):
+        if button == self.btn_mdi_space:
+            char = ' '
+        elif button == self.btn_mdi_dot:
+            char = '.'
+        elif button == self.btn_mdi_minus:
+            char = '-'
+        else:
+            char = button.text()
+        self.mdiLine.insert(char)
+        self.mdiLine.setFocus()
+
+    def mdi_enter_pressed(self):
+        if self.mdiLine.text() == "CLEAR HISTORY":
+            self.parent.add_status("MDI history cleared")
+        self.w.mdihistory.run_command()
+        self.mdiLine.clear()
+
+    def mdi_select_text(self):
+        if self.w.cmb_mdi_texts.currentIndex() <= 0: return
+        self.mdiLine.setText(self.w.cmb_mdi_texts.currentText())
+        self.w.cmb_mdi_texts.setCurrentIndex(0)
+
+
+class MonitorStatus:
+    def __init__(self, parent):
+        self.parent = parent
+        self.lock = threading.Lock()
+
+    def update(self, **kwargs):
+        with self.lock:
+            self.data.update(kwargs)
+
+    def get(self):
+        with self.lock:
+            status = self.parent.get_status()
+        return status
+
+class HandlerClass:
+    def __init__(self, halcomp, widgets, paths):
+        self.h = halcomp
+        self.w = widgets
+        self.styleeditor = SSE(widgets, paths, addBuiltinStyles=False)
+        self.settings_checkboxes = []
+        self.touchoff_checkboxes = []
+        self.settings_touchoff = []
+        self.settings_offsets = []
+        self.settings_spindle = []
+        KEYBIND.add_call('Key_F4', 'on_keycall_F4')
+        KEYBIND.add_call('Key_F12','on_keycall_F12')
+        KEYBIND.add_call('Key_Pause', 'on_keycall_PAUSE')
+        KEYBIND.add_call('Key_Any', 'on_keycall_PAUSE')
+        KEYBIND.add_call('Key_Space', 'on_keycall_PAUSE')
+        # references to utility objects to be initialized
+        self.probe = None
+        self.tool_db = None
+        self.zlevel = None
+        self.mdiPanel = None
+        # some global variables
+        self.status_timeout = 10000
+        self.dialog_code = 'CALCULATOR'
+        self.kbd_code = 'KEYBOARD'
+        self.tool_code = 'TOOLCHOOSER'
+        self.filemanager = None
+        self.deleteFile = None
+        self.current_tool = 0
+        self.pgm_start_time = 0.0
+        self.tool_list = []
+        self.next_available = 0
+        self.start_line = 0
+        self.feedrate_style = ''
+        self.btn_style = ''
+        self.statusbar_style = ''
+        self.stat_warnings = 0
+        self.stat_errors = 0
+        self.spindle_role = 'power'
+        self.tmpl = '.3f' if INFO.MACHINE_IS_METRIC else '.4f'
+        self.machine_units = "MM" if INFO.MACHINE_IS_METRIC else "IN"
+        self.min_spindle_rpm = int(INFO.MIN_SPINDLE_SPEED)
+        self.max_spindle_rpm = int(INFO.MAX_SPINDLE_SPEED)
+        self.max_linear_velocity = int(INFO.MAX_LINEAR_JOG_VEL)
+        self.default_linear_jog_vel = int(INFO.DEFAULT_LINEAR_JOG_VEL)
+        self.max_angular_velocity = int(INFO.MAX_ANGULAR_JOG_VEL)
+        self.default_angular_jog_vel = int(INFO.DEFAULT_ANGULAR_JOG_VEL)
+        self.progress = 0
+        self.axis_list = INFO.AVAILABLE_AXES
+        self.jog_from_name = INFO.GET_JOG_FROM_NAME
+        self.system_list = ["G54","G55","G56","G57","G58","G59","G59.1","G59.2","G59.3"]
+        self.slow_linear_jog = False
+        self.slow_angular_jog = False
+        self.slow_jog_factor = 10
+        self.reload_tool = 0
+        self.last_loaded_program = ""
+        self.comp_enable = False
+        self.current_loaded_program = None
+        self.first_turnon = True
+        self.macros_defined = []
+        self.pause_timer = QTimer()
+        self.source_file = ''
+        self.destination_file = ''
+        self.icon_btns = {'exit'       : 'SP_BrowserStop',
+                          'cycle_start': 'SP_MediaPlay',
+                          'reload'     : 'SP_BrowserReload',
+                          'step'       : 'SP_ArrowForward',
+                          'pause'      : 'SP_MediaPause',
+                          'stop'       : 'SP_MediaStop',
+                          'load_file'  : 'SP_MediaPlay'}
+
+        self.adj_list = ['maxvel_ovr', 'rapid_ovr', 'feed_ovr', 'spindle_ovr']
+
+        self.unit_label_list = ["zoffset_units", "retract_units", "zsafe_units", "touch_units", "max_probe_units",
+                                "start_height_units", "sensor_units", "gauge_units", "rotary_units", "mpg_units"]
+
+        self.lineedit_list = ["work_height", "touch_height", "sensor_height", "laser_x", "laser_y", "camera_x", "camera_y",
+                              "search_vel", "probe_vel", "retract", "max_probe", "start_height", "eoffset", "sensor_x", "sensor_y",
+                              "zsafe", "probe_x", "probe_y", "rotary_height", "gauge_height", "spindle_raise"]
+
+        self.axis_a_list = ["dro_axis_a", "lbl_max_angular", "lbl_max_angular_vel", "angular_increment",
+                            "action_zero_a", "btn_rewind_a", "action_home_a", "widget_angular_jog", "axis_a_height"]
+
+        self.remap_parms = ['work_height', 'sensor_height', 'sensor_x', 'sensor_y',
+                            'search_vel', 'probe_vel', 'max_probe', 'retract', 'zsafe']
+
+        self.gcode_titles = ["GCODE", "MDI INPUT"]
+
+        STATUS.connect('general', self.dialog_return)
+        STATUS.connect('state-estop', lambda w: self.add_status("ESTOP activated", ERROR))
+        STATUS.connect('state-estop-reset', lambda w: self.add_status("ESTOP reset"))
+        STATUS.connect('state-on', lambda w: self.enable_onoff(True))
+        STATUS.connect('state-off', lambda w: self.enable_onoff(False))
+        STATUS.connect('mode-manual', lambda w: self.enable_auto(False))
+        STATUS.connect('mode-mdi', lambda w: self.enable_auto(False))
+        STATUS.connect('mode-auto', lambda w: self.enable_auto(True))
+        STATUS.connect('gcode-line-selected', lambda w, line: self.set_start_line(line))
+        STATUS.connect('hard-limits-tripped', self.hard_limit_tripped)
+        STATUS.connect('user-system-changed', lambda w, data: self.user_system_changed(data))
+        STATUS.connect('metric-mode-changed', lambda w, mode: self.metric_mode_changed(mode))
+        STATUS.connect('tool-in-spindle-changed', lambda w, tool: self.tool_changed(tool))
+        STATUS.connect('file-loaded', lambda w, filename: self.program_loaded(filename))
+        STATUS.connect('all-homed', self.all_homed)
+        STATUS.connect('not-all-homed', self.not_all_homed)
+        STATUS.connect('program_pause_changed', lambda w, state: self.pause_changed(state))
+        STATUS.connect('interp-idle', lambda w: self.stop_timer())
+        STATUS.connect('graphics-gcode-properties', lambda w, d: self.update_gcode_properties(d))
+        STATUS.connect('status-message', lambda w, d, o: self.add_external_status(d, o)) 
+        STATUS.connect('override-limits-changed', lambda w, state, data: self._check_override_limits(state, data))
+
+    def class_patch__(self):
+        pass
+#        self.old_fman = FM.load
+#        FM.load = self.load_code
+
+    def initialized__(self):
+        self.init_pins()
+        self.init_preferences()
+        self.init_macros()
+        self.init_tooldb()
+        self.init_widgets()
+        self.init_utils()
+        self.init_gcode_editor()
+        self.init_file_manager()
+        self.init_probe()
+        self.init_mdi_panel()
+        self.init_adjustments()
+        self.init_event_filter()
+        self.init_web_server()
+        # initialize widget states
+        self.w.stacked_gcode.setCurrentIndex(0)
+        self.w.btn_dimensions.setChecked(True)
+        self.w.page_buttonGroup.buttonClicked.connect(self.main_tab_changed)
+        self.w.preset_buttonGroup.buttonClicked.connect(self.preset_jograte)
+        self.use_mpg_changed(self.w.chk_use_mpg.isChecked())
+        self.use_camera_changed(self.w.chk_use_camera.isChecked())
+        self.touchoff_changed(True)
+        # determine if A axis widgets should be visible or not
+        if not "A" in self.axis_list:
+            for item in self.axis_a_list:
+                self.w[item].hide()
+        # set validators for lineEdit widgets
+        if INFO.MACHINE_IS_METRIC:
+            regex = QRegExp(r'^((\d{1,4}(\.\d{1,3})?)|(\.\d{1,3}))$')
+        else:
+            regex = QRegExp(r'^((\d{1,3}(\.\d{1,4})?)|(\.\d{1,4}))$')
+        valid = QRegExpValidator(regex)
+        for val in self.lineedit_list:
+            self.w['lineEdit_' + val].setValidator(valid)
+        self.w.lineEdit_spindle_raise.setValidator(QIntValidator(0, 99))
+        self.w.lineEdit_max_power.setValidator(QIntValidator(0, 9999))
+        self.w.lineEdit_tool_in_spindle.setValidator(QIntValidator(0, 99999))
+        # set unit labels according to machine mode
+        self.w.lbl_machine_units.setText("METRIC" if INFO.MACHINE_IS_METRIC else "IMPERIAL")
+        for i in self.unit_label_list:
+            self.w['lbl_' + i].setText(self.machine_units)
+        for i in ["search_vel_units", "probe_vel_units"]:
+            self.w['lbl_' + i].setText(self.machine_units + "/MIN")
+        self.w.setWindowFlags(Qt.FramelessWindowHint)
+        # instantiate color highlighter for machine log
+        self.highlighter = Highlighter(self.w.machine_log.logText)
+        # connect all signals to corresponding slots
+        connect = Connections(self)
+        self.w.tooloffsetview.tablemodel.layoutChanged.connect(self.get_checked_tools)
+        self.w.tooloffsetview.tablemodel.dataChanged.connect(lambda new, old, roles: self.tool_data_changed(new, old, roles))
+        self.w.statusbar.messageChanged.connect(self.statusbar_changed)
+        self.w.stacked_gcode.currentChanged.connect(self.gcode_widget_changed)
+        self.w.lineEdit_tool_in_spindle.returnPressed.connect(self.tool_edit_finished)
+        for item in self.remap_parms:
+            widget = self.w[f'lineEdit_{item}']
+            widget.returnPressed.connect(lambda i=item: self.input_changed(i))
+
+    #############################
+    # SPECIAL FUNCTIONS SECTION #
+    #############################
+
+    def init_m6_remap(self):
+        self.auto_touchoff_changed(self.w.chk_auto_touchoff.isChecked())
+        for item in self.remap_parms:
+            val = self.w[f'lineEdit_{item}'].text()
+            ACTION.CALL_MDI(f'#<_{item}> = {val}')
+        ACTION.SET_MANUAL_MODE()
+        self.w.btn_manual_mode.setChecked(True)
+
+    def init_pins(self):
+        # spindle control pins
+        pin = QHAL.newpin("spindle-amps", QHAL.HAL_REAL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.spindle_pwr_changed)
+        pin = QHAL.newpin("spindle-volts", QHAL.HAL_REAL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.spindle_pwr_changed)
+        pin = QHAL.newpin("modbus-fault", QHAL.HAL_UINT, QHAL.HAL_IN)
+        pin.value_changed.connect(lambda data: self.w.lbl_modbus_fault.setText(hex(data)))
+        pin = QHAL.newpin("modbus-errors", QHAL.HAL_UINT, QHAL.HAL_IN)
+        pin.value_changed.connect(lambda data: self.w.lbl_modbus_errors.setText(str(data)))
+        QHAL.newpin("spindle-inhibit", QHAL.HAL_BOOL, QHAL.HAL_OUT)
+        # external offset control pins
+        QHAL.newpin("eoffset-count", QHAL.HAL_SINT, QHAL.HAL_OUT)
+        pin = QHAL.newpin("eoffset-value", QHAL.HAL_REAL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.eoffset_value_changed)
+        # Z level compensation
+        QHAL.newpin("comp_enable", QHAL.HAL_BOOL, QHAL.HAL_OUT)
+        # MPG axis select pins
+        pin = QHAL.newpin("axis-select-x", QHAL.HAL_BOOL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.show_selected_axis)
+        pin = QHAL.newpin("axis-select-y", QHAL.HAL_BOOL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.show_selected_axis)
+        pin = QHAL.newpin("axis-select-z", QHAL.HAL_BOOL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.show_selected_axis)
+        pin = QHAL.newpin("axis-select-a", QHAL.HAL_BOOL, QHAL.HAL_IN)
+        pin.value_changed.connect(self.show_selected_axis)
+        # MPG encoder disable
+        QHAL.newpin("mpg-disable", QHAL.HAL_BOOL, QHAL.HAL_OUT)
+        # MPG increment
+        pin = QHAL.newpin("mpg_increment", QHAL.HAL_REAL, QHAL.HAL_IN)
+        pin.value_changed.connect(lambda data: self.w.lineEdit_mpg_increment.setText(str(data * 4)))
+        # program runtimer
+        pin = QHAL.newpin("runtime-start", QHAL.HAL_BOOL, QHAL.HAL_OUT)   
+        pin = QHAL.newpin("runtime-pause", QHAL.HAL_BOOL, QHAL.HAL_OUT)
+        pin = QHAL.newpin("runtime-seconds", QHAL.HAL_UINT, QHAL.HAL_IN)
+        pin.value_changed.connect(self.update_runtime)
+        pin = QHAL.newpin("runtime-minutes", QHAL.HAL_UINT, QHAL.HAL_IN)
+        pin = QHAL.newpin("runtime-hours", QHAL.HAL_UINT, QHAL.HAL_IN)
+        # initialize some pins
+        self.h['runtime-start'] = False
+        self.h['runtime-pause'] = False
+        self.h['comp_enable'] = False
+
+    def init_preferences(self):
+        if not self.w.PREFS_:
+            self.add_status("No preference file found, enable preferences in screenoptions widget", ERROR)
+            return
+        # using this method allows adding or removing objects in the UI without modifying the handler
+        # operational checkboxes
+        self.settings_checkboxes = self.w.groupBox_operational.findChildren(QCheckBox)
+        for checkbox in self.settings_checkboxes:
+            checkbox.setChecked(self.w.PREFS_.getpref(checkbox.objectName(), False, bool, 'CUSTOM_FORM_ENTRIES'))
+        # touchoff checkboxes
+        self.touchoff_checkboxes = self.w.frame_touchoff.findChildren(QCheckBox)
+        for checkbox in self.touchoff_checkboxes:
+            checkbox.setChecked(self.w.PREFS_.getpref(checkbox.objectName(), False, bool, 'CUSTOM_FORM_ENTRIES'))
+        # touchoff settings
+        self.settings_touchoff = self.w.frame_touchoff.findChildren(QLineEdit)
+        for touchoff in self.settings_touchoff:
+            touchoff.setText(self.w.PREFS_.getpref(touchoff.objectName(), '10', str, 'CUSTOM_FORM_ENTRIES'))
+        # offsets settings
+        self.settings_offsets = self.w.frame_locations.findChildren(QLineEdit)
+        for offset in self.settings_offsets:
+            offset.setText(self.w.PREFS_.getpref(offset.objectName(), '10', str, 'CUSTOM_FORM_ENTRIES'))
+        # spindle settings
+        self.settings_spindle = self.w.frame_spindle_settings.findChildren(QLineEdit)
+        for spindle in self.settings_spindle:
+            spindle.setText(self.w.PREFS_.getpref(spindle.objectName(), '10', str, 'CUSTOM_FORM_ENTRIES'))
+        self.max_spindle_power = int(self.w.lineEdit_max_power.text())
+        # all remaining fields
+        self.last_loaded_program = self.w.PREFS_.getpref('last_loaded_file', None, str,'BOOK_KEEPING')
+        self.reload_tool = self.w.PREFS_.getpref('Tool to load', 0, int,'CUSTOM_FORM_ENTRIES')
+        self.w.lineEdit_work_height.setText(self.w.PREFS_.getpref('Work Height', '20', str, 'CUSTOM_FORM_ENTRIES'))
+        self.w.spinBox_duration.setValue(self.w.PREFS_.getpref('Status Timeout', '10', int, 'CUSTOM_FORM_ENTRIES'))
+
+    def closing_cleanup__(self):
+        if not self.w.PREFS_: return
+        for checkbox in self.settings_checkboxes:
+            self.w.PREFS_.putpref(checkbox.objectName(), checkbox.isChecked(), bool, 'CUSTOM_FORM_ENTRIES')
+        for checkbox in self.touchoff_checkboxes:
+            self.w.PREFS_.putpref(checkbox.objectName(), checkbox.isChecked(), bool, 'CUSTOM_FORM_ENTRIES')
+        for touchoff in self.settings_touchoff:
+            self.w.PREFS_.putpref(touchoff.objectName(), touchoff.text(), str, 'CUSTOM_FORM_ENTRIES')
+        for offset in self.settings_offsets:
+            self.w.PREFS_.putpref(offset.objectName(), offset.text(), str, 'CUSTOM_FORM_ENTRIES')
+        for spindle in self.settings_spindle:
+            self.w.PREFS_.putpref(spindle.objectName(), spindle.text(), str, 'CUSTOM_FORM_ENTRIES')
+        if self.last_loaded_program is not None:
+            self.w.PREFS_.putpref('last_loaded_directory', os.path.dirname(self.last_loaded_program), str, 'BOOK_KEEPING')
+            self.w.PREFS_.putpref('last_loaded_file', self.last_loaded_program, str, 'BOOK_KEEPING')
+        self.w.PREFS_.putpref('Tool to load', STATUS.get_current_tool(), int, 'CUSTOM_FORM_ENTRIES')
+        self.w.PREFS_.putpref('Work Height', self.w.lineEdit_work_height.text(), float, 'CUSTOM_FORM_ENTRIES')
+        self.w.PREFS_.putpref('Status Timeout', self.w.spinBox_duration.value(), int, 'CUSTOM_FORM_ENTRIES')
+
+        # check for closing cleanup methods in imported utilities
+        self.setup_utils.closing_cleanup__()
+        self.tool_db.closing_cleanup__()
+
+    def init_widgets(self):
+        self.w.main_tab_widget.setCurrentIndex(TAB_MAIN)
+        self.w.adj_linear_jog.setValue(self.default_linear_jog_vel)
+        self.w.adj_linear_jog.setMaximum(self.max_linear_velocity)
+        self.w.adj_angular_jog.setValue(self.default_angular_jog_vel)
+        self.w.adj_angular_jog.setMaximum(self.max_angular_velocity)
+        self.w.adj_spindle_ovr.setValue(100)
+        self.w.chk_override_limits.setChecked(False)
+        self.w.chk_override_limits.setEnabled(False)
+        self.w.lineEdit_home_x.setText(INFO.get_error_safe_setting('JOINT_0', 'HOME',"50"))
+        self.w.lineEdit_home_y.setText(INFO.get_error_safe_setting('JOINT_1', 'HOME',"50"))
+        self.w.lbl_max_velocity.setText(f"{self.max_linear_velocity}")
+        self.w.lbl_max_angular.setText(f"{self.max_angular_velocity}")
+        self.w.lineEdit_min_rpm.setText(f"{self.min_spindle_rpm}")
+        self.w.lineEdit_max_rpm.setText(f"{self.max_spindle_rpm}")
+        # gcode file history
+        self.w.cmb_program_history.view().setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.w.cmb_program_history.setMaxVisibleItems(10)
+        # gcode editor mode
+        self.w.gcode_viewer.readOnlyMode()
+        # set calculator mode for menu buttons
+        for i in ("x", "y", "z"):
+            self.w["axistoolbutton_" + i].set_dialog_code(self.dialog_code)
+        # disable mouse wheel events on comboboxes
+        self.w.cmb_program_history.wheelEvent = lambda event: None
+        self.w.jogincrements_linear.wheelEvent = lambda event: None
+        self.w.jogincrements_angular.wheelEvent = lambda event: None
+        # turn off table grids
+        self.w.offset_table.setShowGrid(False)
+        self.w.tooloffsetview.setShowGrid(False)
+        # move clock to statusbar
+        self.w.lbl_clock.set_textTemplate(f'VYRAXIS {VERSION}  <>  %I:%M:%S %p')
+        self.w.statusbar.addPermanentWidget(self.w.lbl_clock)
+        # set homing buttons to correct joints
+        self.w.action_home_x.set_joint(self.jog_from_name['X'])
+        self.w.action_home_y.set_joint(self.jog_from_name['Y'])
+        self.w.action_home_z.set_joint(self.jog_from_name['Z'])
+        # set Zero reference buttons to correct joints
+        self.w.action_zero_x.set_joint(self.jog_from_name['X'])
+        self.w.action_zero_y.set_joint(self.jog_from_name['Y'])
+        self.w.action_zero_z.set_joint(self.jog_from_name['Z'])
+        # set axis reference buttons to correct joints
+        self.w.axistoolbutton_x.set_joint(self.jog_from_name['X'])
+        self.w.axistoolbutton_y.set_joint(self.jog_from_name['Y'])
+        self.w.axistoolbutton_z.set_joint(self.jog_from_name['Z'])
+        if 'A' in self.axis_list:
+            self.w.action_home_a.set_joint(self.jog_from_name['A'])
+        # initialize spindle gauge
+        self.w.gauge_spindle._value_font_size = 12
+        self.w.gauge_spindle.set_threshold(self.min_spindle_rpm)
+        # initialize jog joypads
+        self.w.jog_xy.setFont(QFont('Lato Heavy', 9))
+        self.w.jog_az.setFont(QFont('Lato Heavy', 9))
+        self.w.jog_xy.set_tooltip('C', 'Toggle FAST / SLOW linear jograte')
+        self.w.jog_az.set_tooltip('C', 'Toggle FAST / SLOW angular jograte')
+        # apply standard button icons
+        for btn in self.icon_btns:
+            style = self.w[f'btn_{btn}'].style()
+            icon = style.standardIcon(getattr(QStyle, self.icon_btns[btn]))
+            self.w[f'btn_{btn}'].setIcon(icon)
+        # spindle pause delay timer
+        self.pause_timer.setSingleShot(True)
+        self.pause_timer.timeout.connect(self.spindle_pause_timer)
+        # default styles for feedrate and statusbar
+        self.feedrate_style = self.w.lbl_feedrate.styleSheet()
+        self.btn_style = self.w.btn_pause.styleSheet()
+        self.statusbar_style = self.w.statusbar.styleSheet()
+        # sliding macro button frame
+        self.macros_open = False
+        self.w.btn_marker.setText("◀")
+        self.w.frm_macro_buttons.setMaximumWidth(0)
+        self.animation = QPropertyAnimation(self.w.frm_macro_buttons, b"maximumWidth")
+        self.animation.setDuration(300)
+        self.animation.setEasingCurve(QEasingCurve.InOutCubic)
+        # fetch current stylesheet to show in SETTINGS page
+        self.get_current_style()
+
+    def init_gcode_editor(self):
+        self.w.gcodeeditor.editor.setCaretForegroundColor(Qt.yellow)
+        self.w.gcodeeditor.gCodeLexerAction.setVisible(False)
+        self.w.gcodeeditor.pythonLexerAction.setVisible(False)
+        # instance patch editor actions
+        self.w.gcodeeditor.exitAction.disconnect()
+        self.w.gcodeeditor.openReturn = self.openReturn
+        self.w.gcodeeditor.saveReturn = self.saveReturn
+        self.w.gcodeeditor.exitAction.triggered.connect(self.exitCall)
+
+    def init_file_manager(self):
+        self.w.filemanager_usb.table.setShowGrid(False)
+        self.w.filemanager_usb.chk_restricted.setChecked(True)
+        self.w.filemanager_usb.onMediaClicked()
+        self.w.filemanager_usb.loadButton.hide()
+        self.w.filemanager_usb.copy_control.hide()
+        self.w.filemanager_user.table.setShowGrid(False)
+        self.w.filemanager_user.chk_restricted.setChecked(True)
+        self.w.filemanager_user.onUserClicked()
+        self.w.filemanager_user.loadButton.hide()
+        self.w.filemanager_user.copy_control.hide()
+        self.w.filemanager_user.table.clicked.connect(lambda index: self.select_filemanager(True))
+        self.w.filemanager_usb.table.clicked.connect(lambda index: self.select_filemanager(False))
+        # set initial active file manager
+        self.filemanager = self.w.filemanager_user
+
+    def init_tooldb(self):
+        from lib.tool_db import Tool_Database
+        self.tool_db = Tool_Database(self)
+        self.w.layout_tooldb.addWidget(self.tool_db)
+        self.db_helpfile = os.path.join(HELP, 'tooldb_help.html')
+        self.w.btn_export_table.pressed.connect(self.tool_db.export_table)
+        self.w.tabWidget_tools.setCurrentIndex(0)
+        self.w.tabWidget_tools.currentChanged.connect(self.tabwidget_tools_changed)
+        self.tool_db.hal_init()
+        self.tool_db.load_tool_table(self.tool_list)
+        self.w.lineEdit_num_tools.setText(self.tool_db.get_tool_count())
+
+    def init_probe(self):
+        probe = INFO.get_error_safe_setting('PROBE', 'USE_PROBE', 'none').lower()
+        if probe == 'versaprobe':
+            self.add_status("VersaProbe is not supported in this version", ERROR)
+            return
+        elif probe == 'basicprobe':
+            from lib.basic_probe import BasicProbe
+            self.probe = BasicProbe(self)
+            self.probe.setObjectName('basicprobe')
+            self.w.btn_probe.setProperty('title', 'BASIC PROBE')
+        else:
+            LOG.info("No valid probe widget specified")
+            self.w.btn_probe.hide()
+            self.w.chk_inhibit_spindle.hide()
+            self.w.probe_offset.hide()
+            return
+        self.w.probe_layout.addWidget(self.probe)
+        self.probe.hal_init()
+
+    def init_mdi_panel(self):
+        self.mdiPanel = MDIPanel(self)
+        self.w.mdihistory.MDILine.setFixedHeight(30)
+        self.w.mdihistory.MDILine.setPlaceholderText('MDI:')
+        self.w.cmb_mdi_texts.addItem("SELECT")
+        self.w.cmb_mdi_texts.addItem("HALSHOW")
+        self.w.cmb_mdi_texts.addItem("HALMETER")
+        self.w.cmb_mdi_texts.addItem("HALSCOPE")
+        self.w.cmb_mdi_texts.addItem("STATUS")
+        self.w.cmb_mdi_texts.addItem("CLASSICLADDER")
+        self.w.cmb_mdi_texts.addItem("CALIBRATION")
+        self.w.cmb_mdi_texts.addItem("PREFERENCE")
+        self.w.cmb_mdi_texts.addItem("CLEAR HISTORY")
+        self.w.btn_mdi_enter.pressed.connect(self.mdiPanel.mdi_enter_pressed)
+        self.w.cmb_mdi_texts.activated.connect(self.mdiPanel.mdi_select_text)
+        
+    def init_utils(self):
+        # set up utility plugins and associated button
+        from lib.plugin_manager import Setup_Utils
+        self.setup_utils = Setup_Utils(self)
+        self.util_list = self.setup_utils.get_util_list()
+        menu = QMenu(self.w.btn_utils)
+        for key, val in self.util_list.items():
+            action = menu.addAction(key)
+            action.setData(key)
+        menu.triggered.connect(self.show_dialog)
+        self.w.btn_utils.setMenu(menu)
+        # set up FILE toolbutton
+        menu = QMenu(self.w.btn_file)
+        for i, item in enumerate(['PROGRAMS', 'EDIT GCODE', 'DOC_VIEWER']):
+            action = menu.addAction(item)
+            action.setData((i, item))
+        menu.triggered.connect(self.set_file_page)
+        self.w.btn_file.setMenu(menu)
+        # if z level compensation wasn't installed, disable the button
+        if not QHAL.hal.component_exists("compensate"):
+            self.add_status("Z level compensation HAL component not loaded", ERROR)
+            self.w.btn_enable_comp.setText("Z COMP\nDISABLED")
+            self.w.btn_enable_comp.setEnabled(False)
+        if self.zlevel is None:
+            self.w.btn_enable_comp.setEnabled(False)
+        self.get_next_available()
+
+    def show_dialog(self, action):
+        dialog_class = action.data()
+        dialog = self.util_list[dialog_class]
+        dialog.show()
+        text = dialog_class.replace(' ', '\n')
+        self.w.btn_utils.setText(text)
+
+    def set_file_page(self, action):
+        idx, text = action.data()
+        text = text.replace(' ', '\n')
+        self.w.btn_file.setText(text)
+        self.w.main_tab_widget.setCurrentIndex(TAB_FILE)
+        self.w.stacked_file.setCurrentIndex(idx)
+        if idx == 1:
+            self.edit_gcode()
+
+    def init_event_filter(self):
+        self.default_line_style = self.w.lineEdit_work_height.styleSheet()
+        line_list = self.lineedit_list
+        # eoffset is removed because it's readonly
+        if 'eoffset' in line_list:
+            line_list.remove('eoffset')
+        self.event_filter = EventFilter(self.w)
+        for line in line_list:
+            self.w[f'lineEdit_{line}'].installEventFilter(self.event_filter)
+        self.w.lineEdit_tool_in_spindle.installEventFilter(self.event_filter)
+        self.event_filter.set_line_list(line_list)
+        self.event_filter.set_tool_list('tool_in_spindle')
+        self.event_filter.set_parms(('_handler_', False))
+        self.event_filter.set_dialog_mode(self.w.chk_use_calculator.isChecked())
+
+    def init_web_server(self):
+        from lib.monitor_server import MonitorServer
+        self.monitor_status = MonitorStatus(self)
+        self.monitor_server = MonitorServer(self.monitor_status, port=8080)
+        self.monitor_server.start()
+
+    def init_macros(self):
+        # macro buttons defined in INI under [MDI_COMMAND_LIST]
+        for i in range(20):
+            button = self.w[f'btn_macro{i}']
+            key = f'MACRO{i}'
+            cmd = INFO.get_ini_mdi_command(key)
+            if cmd is None:
+                button.setText('')
+                button.setEnabled(False)
+            else:
+                label = INFO.get_ini_mdi_label(key)
+                lbl = label.replace(r'\n', '\n')
+                tip = cmd.replace(';','\n')
+                tooltip = f'MDI CMD MACRO{key}:\n{tip}'
+                button.setText(lbl)
+                button.setToolTip(tooltip)
+                button.setProperty('ini_mdi_cmd', cmd)
+                self.macros_defined.append(i)
+                button.pressed.connect(lambda i=i: self.macro_btn_pressed(i))
+        # check if any macros are in groups 1 or 2. If not, hide that group.
+        show = False
+        for i in range(10):
+            if i in self.macros_defined:
+                show = True
+                break
+        self.w.group1_macro_buttons.setVisible(show)
+        show = False
+        for i in range(10, 20):
+            if i in self.macros_defined:
+                show = True
+                break
+        self.w.group2_macro_buttons.setVisible(show)
+
+    def init_adjustments(self):
+        # modify the status adjustment bars to have custom icons
+        icon = QIcon(os.path.join(STYLES, 'arrow_left.png'))
+        icon_size = 24
+        for item in self.adj_list:
+            btn = self.w[f"adj_{item}"].tb_down
+            btn.setArrowType(Qt.NoArrow)
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(icon_size, icon_size))
+        icon = QIcon(os.path.join(STYLES, 'arrow_right.png'))
+        for item in self.adj_list:
+            btn = self.w[f"adj_{item}"].tb_up
+            btn.setArrowType(Qt.NoArrow)
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(icon_size, icon_size))
+        # slow the adjustment bars timer down
+        for item in self.adj_list:
+            self.w[f"adj_{item}"].timer_value = 200
+
+    def processed_key_event__(self, receiver, event, is_pressed, key, code, shift, cntrl):
+        # when typing in MDI, we don't want keybinding to call functions
+        # so we catch and process the events directly.
+        # We do want ESC, F1 and F2 to call keybinding functions though
+        if code not in(Qt.Key_Escape, Qt.Key_F1 , Qt.Key_F2):
+#                    Qt.Key_F3, Qt.Key_F4, Qt.Key_F5):
+
+            # search for the top widget of whatever widget received the event
+            # then check if it's one we want the keypress events to go to
+            flag = False
+            receiver2 = receiver
+            while receiver2 is not None and not flag:
+                if isinstance(receiver2, QDialog):
+                    flag = True
+                    break
+                if isinstance(receiver2, QLineEdit):
+                    flag = True
+                    break
+                if isinstance(receiver2, MDI_WIDGET):
+                    flag = True
+                    break
+                if isinstance(receiver2, GCODE):
+                    flag = True
+                    break
+                if isinstance(receiver2, TOOL_TABLE):
+                    flag = True
+                    break
+                if isinstance(receiver2, OFFSET_VIEW):
+                    flag = True
+                    break
+                receiver2 = receiver2.parent()
+
+            if flag:
+                if isinstance(receiver2, GCODE):
+                    # if in manual do our keybindings - otherwise
+                    # send events to gcode widget
+                    if STATUS.is_man_mode() == False or not receiver2.isReadOnly():
+                        if is_pressed:
+                            receiver.keyPressEvent(event)
+                            event.accept()
+                        return True
+                if is_pressed:
+                    receiver.keyPressEvent(event)
+                    event.accept()
+                    return True
+                else:
+                    event.accept()
+                    return True
+
+        if event.isAutoRepeat(): return True
+        # ok if we got here then try keybindings
+        return KEYBIND.manage_function_calls(self, event, is_pressed, key, shift, cntrl)
+
+    #########################
+    # CALLBACKS FROM STATUS #
+    #########################
+
+    def dialog_return(self, w, message):
+        rtn = message.get('RETURN')
+        name = message.get('NAME')
+        obj = message.get('OBJECT')
+        unhome_code = bool(message.get('ID') == '_unhome_')
+        reload_code = bool(message.get('ID') == '_reload_')
+        lower_code = bool(message.get('ID') == '_wait_to_lower_')
+        handler_code = bool(message.get('ID') == '_handler_')
+        delete_code = bool(message.get('ID') == '_delete_')
+        rename_code = bool(message.get('ID') == '_rename_')
+        file_code = bool(message.get('ID') == '_new_file_')
+        folder_code = bool(message.get('ID') == '_new_folder_')
+        if unhome_code and name == 'MESSAGE' and rtn is True:
+            ACTION.SET_MACHINE_UNHOMED(-1)
+            self.add_status("All axes unhomed")
+        if reload_code and name == 'MESSAGE':
+            fname = self.w.cmb_program_history.currentText()
+            if rtn is True:
+                ACTION.OPEN_PROGRAM(fname)
+        elif lower_code and name == 'MESSAGE':
+            self.h['spindle-inhibit'] = False
+            # add time delay for spindle to attain speed
+            self.pause_timer.start(1000)
+        elif delete_code and name == 'MESSAGE':
+            if rtn is True:
+                self.deleteReturn()
+            else:
+                self.add_status(f"{self.deleteFile} not deleted")
+        elif rename_code and name == self.kbd_code:
+            if rtn is None: return
+            os.rename(self.source_file, rtn)
+        elif file_code and name == self.kbd_code:
+            if rtn is None: return
+            self.fileReturn(rtn)
+        elif folder_code and name == self.kbd_code:
+            if rtn is None: return
+            self.folderReturn(rtn)
+        elif handler_code and name == self.dialog_code:
+            obj.setStyleSheet(self.default_line_style)
+            if rtn is None: return
+            LOG.debug(f'message return: {message}')
+            if obj == self.w.lineEdit_spindle_raise:
+                obj.setText(str(int(rtn)))
+            else:
+                obj.setText(f'{rtn:{self.tmpl}}')
+        elif handler_code and name == self.kbd_code:
+            obj.setStyleSheet(self.default_line_style)
+            if rtn is None: return
+            LOG.debug(f'message return: {message}')
+            obj.setText(rtn)
+            name = obj.objectName().replace('lineEdit_', '')
+            if name in self.remap_parms:
+                self.input_changed(name)
+        elif handler_code and name == self.tool_code:
+            if rtn is None: return
+            self.w.lineEdit_tool_in_spindle.setText(str(rtn))
+            self.tool_edit_finished()
+
+    def tool_edit_finished(self):
+        tool = int(self.w.lineEdit_tool_in_spindle.text())
+        if tool == self.current_tool:
+            self.add_status(f"Tool {tool} already in spindle", WARNING)
+        elif tool not in self.tool_list:
+            self.add_status(f'Tool {tool} is not a valid tool', WARNING)
+            self.w.lineEdit_tool_in_spindle.setText(str(self.current_tool))
+        else:
+            self.current_tool = tool
+            ACTION.CALL_MDI_WAIT(f'M61 Q{tool} G43', mode_return=True)
+        self.w.lineEdit_tool_in_spindle.clearFocus()
+
+    def spindle_pwr_changed(self):
+        # V x I x PF x sqrt(3)
+        # this calculation assumes a power factor of 0.8
+        power = self.h['spindle-volts'] * self.h['spindle-amps'] * 1.386
+        pc = int((power / self.max_spindle_power) * 100)
+        if pc >= 100:
+            self.w.spindle_power.setValue(100)
+        else:
+            self.w.spindle_power.setValue(pc)
+
+    def eoffset_value_changed(self, data):
+        if not self.w.btn_pause_spindle.isChecked() and not self.w.btn_enable_comp.isChecked():
+            self.w.lineEdit_eoffset.setText("DISABLED")
+        else:
+            self.w.lineEdit_eoffset.setText(f"{data:.3f}")
+
+    def user_system_changed(self, data):
+        self.system_index = int(data) - 1
+        sys = self.system_list[self.system_index]
+        self.w.systemtoolbutton.setText(sys)
+        sys = sys.replace('.', '_').lower()
+        self.w[f'action_{sys}'].setChecked(True)
+        self.add_status(f"User system changed to {sys}")
+
+    def metric_mode_changed(self, mode):
+        if mode:
+            self.add_status("Switched to metric units")
+        else:
+            self.add_status("Switched to imperial units")
+        units = "METRIC" if mode else "IMPERIAL"
+        self.w.lineEdit_program_units.setText(units)
+
+    def tool_changed(self, tool):
+        self.current_tool = tool
+        self.w.lineEdit_tool_in_spindle.setText(str(tool))
+        LOG.debug(f"Tool changed to {tool}")
+        self.update_tool_info(tool)
+
+    def program_loaded(self, filename):
+        if filename is not None:
+            self.add_status(f"Loaded file {filename}")
+            self.w.progressBar.reset()
+            self.last_loaded_program = filename
+            self.current_loaded_program = filename
+            self.w.lineEdit_runtime.setText("00:00:00")
+            idx = self.w.cmb_program_history.findText(filename)
+            if idx == -1:
+                self.w.cmb_program_history.addItem(filename)
+                self.w.cmb_program_history.setCurrentIndex(self.w.cmb_program_history.count() - 1)
+            else:
+                self.w.cmb_program_history.setCurrentIndex(idx)
+            if self.zlevel is not None:
+                # determine if loaded file is to be Z compensated
+                comp_file = self.zlevel.program_loaded(filename)
+                self.comp_enable = False if comp_file is None else True
+                if self.w.btn_enable_comp.isChecked() and comp_file is None:
+                    self.add_status(f"No compensation file for {filename}", WARNING)
+                if self.w.btn_enable_comp.isChecked() and self.comp_enable:
+                    self.add_status(f"Z level compensation ON using {comp_file}")
+                    self.h['comp_enable'] = True
+                else:
+                    self.h['comp_enable'] = False
+                    self.h['eoffset-count'] = 0
+        else:
+            self.add_status("Filename not valid", WARNING)
+
+    def percent_loaded_changed(self, pc):
+        if self.progress == pc: return
+        self.progress = pc
+        if pc < 0:
+            self.w.progressBar.setValue(0)
+            self.w.progressBar.setFormat('PROGRESS')
+        else:
+            self.w.progressBar.setValue(pc)
+            self.w.progressBar.setFormat(f'LOADING: {pc}%')
+
+    def percent_done_changed(self, pc):
+        if self.progress == pc: return
+        self.progress = pc
+        if pc < 0:
+            self.w.progressBar.setValue(0)
+            self.w.progressBar.setFormat('PROGRESS')
+        else:
+            self.w.progressBar.setValue(pc)
+            self.w.progressBar.setFormat(f'PROGRESS: {pc}%')
+
+    def all_homed(self, obj):
+        self.w.btn_home_all.setText("ALL\nHOMED")
+        self.w.btn_home_all.setStyleSheet(self.btn_style)
+        if self.first_turnon is True:
+            self.first_turnon = False
+            if self.w.chk_reload_tool.isChecked():
+                command = f"M61 Q{self.reload_tool}"
+                ACTION.CALL_MDI(command)
+            if self.last_loaded_program is not None and self.w.chk_reload_program.isChecked():
+                if os.path.isfile(self.last_loaded_program):
+                    ACTION.OPEN_PROGRAM(self.last_loaded_program)
+        # enable camera buttons according to SETTINGS
+        self.w.btn_ref_camera.setEnabled(self.w.chk_use_camera.isChecked())
+        self.add_status("All axes homed")
+        self.init_m6_remap()
+
+    def not_all_homed(self, obj, unhomed):
+        self.w.btn_home_all.setText("HOME\nALL")
+        self.w.btn_home_all.setStyleSheet(f"color: {STOP_COLOR};")
+
+    def update_runtime(self):
+        hours = self.h['runtime-hours']
+        minutes = self.h['runtime-minutes']
+        seconds = self.h['runtime-seconds']
+        self.w.lineEdit_runtime.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+        run_minutes = (hours * 60) + minutes + (seconds / 60)
+        tis_minutes = run_minutes + self.pgm_start_time
+        self.w.lineEdit_acc_time.setText(f'{tis_minutes:.1f}')
+
+    def pause_changed(self, state):
+        if not STATUS.is_auto_mode(): return
+        if state:
+            self.w.btn_pause.setText('  RESUME')
+            self.w.btn_pause.setStyleSheet(f'color: {PAUSE_COLOR};')
+        else:
+            self.w.btn_pause.setText('  PAUSE')
+            self.w.btn_pause.setStyleSheet(self.btn_style)
+
+    def add_external_status(self, message, option):
+        level = option.get('LEVEL', STATUS.DEFAULT)
+        log = option.get('LOG', True)
+        msg = message.get('SHORTTEXT', '')
+        self.add_status(msg, level)
+
+    def update_gcode_properties(self, props):
+        # substitute nice looking text:
+        property_names = {
+            'name': "Name:", 'size': "Size:",
+            'tools': "Tool order:", 'g0': "Rapid distance:",
+            'g1': "Feed distance:", 'g': "Total distance:",
+            'run': "Run time:",'machine_unit_sys':"Machine Unit System:",
+            'x': "X bounds:",'x_zero_rxy':'X @ Zero Rotation:',
+            'y': "Y bounds:",'y_zero_rxy':'Y @ Zero Rotation:',
+            'z': "Z bounds:",'z_zero_rxy':'Z @ Zero Rotation:',
+            'a': "A bounds:", 'b': "B bounds:",
+            'c': "C bounds:",'toollist':'Tool Change List:',
+            'gcode_units':"Gcode Units:"
+        }
+        if not props: return
+        text = []
+        for i in props:
+            text.append((property_names[i], props[i]))
+        self.setup_utils.show_gcode_properties(text)
+        # show estimated runtime in Tool panel
+        self.w.lineEdit_runtime_estimate.setText(props.get("run", "?"))
+        # send bounds data to zlevel compensation module
+        if self.zlevel is None: return
+        zdata = (props['x'], props['y'], props['gcode_units'])
+        self.zlevel.set_comp_area(zdata)
+
+    def hard_limit_tripped(self, obj, tripped, list_of_tripped):
+        if tripped:
+            self.add_status("Hard limits tripped", ERROR)
+            self.w.chk_override_limits.setEnabled(tripped)
+        else:
+            self.w.chk_override_limits.setChecked(False)
+            self.add_status("Hard Limits Clear")
+
+    # keep check button in synch with external changes
+    def _check_override_limits(self, state, data):
+        if 0 in data:
+            self.w.chk_override_limits.setChecked(False)
+        else:
+            self.w.chk_override_limits.setChecked(True)
+    
+    #######################
+    # CALLBACKS FROM FORM #
+    #######################
+
+    # main button bar
+    def main_tab_changed(self, btn):
+        index = btn.property("index")
+        title = btn.property("title")
+        if index is None: return
+        spindle_inhibit = False
+        if index == TAB_FILE:
+            self.btn_file_pressed()
+        elif index == TAB_PROBE:
+            spindle_inhibit = self.w.chk_inhibit_spindle.isChecked()
+            ACTION.CALL_MDI_WAIT("M5", mode_return=True)
+        elif index == TAB_UTILS:
+            self.btn_utils_pressed()
+        self.w.mdihistory.MDILine.spindle_inhibit(spindle_inhibit)
+        self.h['spindle-inhibit'] = spindle_inhibit
+        self.w.main_tab_widget.setCurrentIndex(index)
+        self.w.groupBox_preview.setTitle(title)
+
+    def btn_file_pressed(self):
+        text = self.w.btn_file.text().replace('\n', ' ')
+        try:
+            idx = ['PROGRAMS', 'EDIT GCODE', 'DOC_VIEWER'].index(text)
+        except ValueError:
+            return
+        self.w.stacked_file.setCurrentIndex(idx)
+        if idx == 1:
+            self.edit_gcode()
+
+    def btn_utils_pressed(self):
+        text = self.w.btn_utils.text()
+        if text == 'UTILITIES': return
+        text = text.replace('\n', ' ')
+        dialog = self.util_list.get(text)
+        if dialog:
+            if dialog.geometry_data:
+                dialog.setGeometry(dialog.geometry_data)
+            dialog.show()
+
+    def update_about_button(self, text):
+        self.w.btn_about.setProperty('title', self.about_dict[text])
+        fname = os.path.join(HELP, 'about_' + text + '.html')
+        if os.path.dirname(fname):
+            url = QUrl("file:///" + fname)
+            self.web_page_about.load(url)
+        else:
+            self.add_status(f"About file {fname} not found", WARNING)
+        self.w.btn_about.setChecked(True)
+        self.main_tab_changed(self.w.btn_about)
+
+    # preview frame
+    def btn_dimensions_changed(self, state):
+        self.w.gcodegraphics.show_extents_option = state
+        self.w.gcodegraphics.clear_live_plotter()
+
+    def toggle_macros(self):
+        if self.macros_open:
+            self.animation.setStartValue(self.w.frm_macro_buttons.width())
+            self.animation.setEndValue(0)
+            self.w.btn_marker.setText("◀")
+            self.macros_open = False
+        else:
+            self.animation.setStartValue(self.w.frm_macro_buttons.width())
+            self.animation.setEndValue(200)
+            self.w.btn_marker.setText("▶")
+            self.macros_open = True
+        self.animation.start()
+
+    def macro_btn_pressed(self, idx):
+        cmds = self.w[f'btn_macro{idx}'].property('ini_mdi_cmd').split(';')
+        for cmd in cmds:
+            ACTION.CALL_MDI_WAIT(cmd, time=30, mode_return=True)
+
+    # gcode frame
+    def cmb_program_history_activated(self):
+        filename = self.w.cmb_program_history.currentText()
+        if filename == self.last_loaded_program:
+            mess = {'NAME': 'MESSAGE',
+                    'ID': '_reload_',
+                    'MESSAGE': 'RELOAD PROGRAM',
+                    'GEONAME': '__message',
+                    'MORE': "Program is already loaded. Reload?",
+                    'NONBLOCKING': True,
+                    'TYPE': 'YESNO'}
+            STATUS.emit('dialog-request', mess)
+        else:
+            ACTION.OPEN_PROGRAM(filename)
+
+    def gcode_widget_changed(self, idx):
+        self.w.groupBox_gcode.setTitle(self.gcode_titles[idx])
+
+    # program frame
+    def btn_run_pressed(self):
+        if STATUS.is_auto_running():
+            self.add_status("Program is already running", WARNING)
+            return
+        if self.current_loaded_program is None:
+            self.add_status("No program has been loaded", WARNING)
+            return
+        self.w.lbl_feedrate.setStyleSheet(f"color: {RUN_COLOR};")
+        if self.start_line <= 1:
+            ACTION.RUN(0)
+        else:
+            # instantiate run from line preset dialog
+            info = f'Running From Line: {self.start_line}'
+            mess = {'NAME' : 'RUNFROMLINE',
+                    'TITLE' : 'Preset Dialog',
+                    'ID' : '_RUNFROMLINE',
+                    'MESSAGE' : info,
+                    'LINE' : self.start_line,
+                    'NONBLOCKING' : True}
+            STATUS.emit('dialog-request', mess)
+        self.add_status(f"Started {self.current_loaded_program} from line {self.start_line}")
+        self.h['runtime-start'] = True
+
+    def btn_stop_pressed(self):
+        if self.w.btn_pause_spindle.isChecked():
+            self.h['spindle-inhibit'] = False
+            self.h['eoffset-count'] = 0
+        self.pause_timer.stop()
+        self.h['runtime-start'] = False
+        self.h['runtime-pause'] = False
+        self.update_runtime()
+        self.w.btn_pause.setText('PAUSE')
+        self.w.btn_pause.setEnabled(True)
+        self.w.btn_pause.setStyleSheet(self.btn_style)
+        self.add_status("Program manually aborted")
+        ACTION.ensure_mode(linuxcnc.MODE_MANUAL)
+        tool = int(self.w.lineEdit_tool_in_spindle.text())
+        if tool > 0:
+            tis = float(self.w.lineEdit_acc_time.text())
+            if self.tool_db.update_tool_time(tool, tis) is None:
+                self.add_status(f'Update tool {tool} time in spindle error', WARNING)
+
+    def btn_pause_pressed(self):
+        if STATUS.is_on_and_idle(): return
+        if STATUS.is_auto_paused():
+            self.h['runtime-pause'] = False
+            ACTION.PAUSE()
+        else:
+            self.h['runtime-pause'] = True
+            ACTION.PAUSE()
+            if self.w.btn_pause_spindle.isChecked():
+                self.pause_spindle()
+
+    def btn_reload_pressed(self):
+        if STATUS.is_auto_running():
+            self.add_status("Cannot reload program while running", WARNING)
+            return
+        if self.last_loaded_program:
+            self.w.progressBar.reset()
+            self.add_status(f"Reloaded file {self.last_loaded_program}")
+            ACTION.OPEN_PROGRAM(self.last_loaded_program)
+
+    def pause_spindle(self):
+        self.h['eoffset-count'] = int(self.w.lineEdit_spindle_raise.text())
+        self.h['spindle-inhibit'] = True
+        self.w.btn_pause.setEnabled(False)
+        self.add_status(f"Spindle paused at {self.w.lineEdit_runtime.text()}")
+        # instantiate warning box
+        info = "Press OK when ready to resume program.\nSpindle will lower when at-speed is achieved."
+        mess = {'NAME': 'MESSAGE',
+                'ICON': 'WARNING',
+                'ID': '_wait_to_lower_',
+                'GEONAME': '__message',
+                'MESSAGE': 'SPINDLE PAUSED',
+                'NONBLOCKING': True,
+                'MORE': info,
+                'TYPE': 'OK'}
+        STATUS.emit('dialog-request', mess)
+
+    def btn_pause_spindle_clicked(self, state):
+        if not state and not self.w.btn_enable_comp.isChecked():
+            self.w.lineEdit_eoffset.setText("DISABLED")
+        text = "enabled" if state else "disabled"
+        self.add_status("Spindle pause " + text)
+
+    def btn_enable_comp_clicked(self, state):
+        if state:
+            self.add_status(f"Z level compensation ENABLED")
+            self.w.btn_enable_comp.setText("Z COMP\nENABLED")
+            self.h['comp_enable'] = self.comp_enable
+        else:
+            self.add_status("Z level compensation DISABLED")
+            if not self.w.btn_pause_spindle.isChecked():
+                self.w.lineEdit_eoffset.setText("DISABLED")
+            self.w.btn_enable_comp.setText("Z COMP\nDISABLED")
+            self.h['comp_enable'] = False
+            self.h['eoffset-count'] = 0
+
+    # jogging frame
+    def jog_xy_pressed(self, btn):
+        if btn == "C":
+            text = "FAST" if self.slow_linear_jog is True else "SLOW"
+            self.w.jog_xy.setCenterText(text)
+            self.btn_linear_fast_clicked(not self.slow_linear_jog)
+        else:
+            axis = 'X' if btn in "LR" else 'Y'
+            direction = 1 if btn in "RT" else -1
+            self.w.jog_xy.set_highlight(axis, True)
+            rate = int(self.w.adj_linear_jog.value())
+            self.w.jog_xy.setCenterText(str(rate))
+            ACTION.ensure_mode(linuxcnc.MODE_MANUAL)
+            ACTION.DO_JOG(axis, direction)
+
+    def jog_az_pressed(self, btn):
+        if btn == "C":
+            text = "FAST" if self.slow_angular_jog is True else "SLOW"
+            self.w.jog_az.setCenterText(text)
+            self.btn_angular_fast_clicked(not self.slow_angular_jog)
+        else:
+            if btn in "LR" and not "A" in self.axis_list: return
+            axis = 'A' if btn in "LR" else 'Z'
+            direction = 1 if btn in "RT" else -1
+            self.w.jog_az.set_highlight(axis, True)
+            rate = int(self.w.adj_linear_jog.value()) if axis == 'Z' else int(self.w.adj_angular_jog.value())
+            self.w.jog_az.setCenterText(str(rate))
+            ACTION.ensure_mode(linuxcnc.MODE_MANUAL)
+            ACTION.DO_JOG(axis, direction)
+
+    def jog_xy_released(self, btn):
+        if btn == "C": return
+        axis = 'X' if btn in "LR" else 'Y'
+        self.w.jog_xy.set_highlight(axis, False)
+        text = "SLOW" if self.slow_linear_jog is True else "FAST"
+        self.w.jog_xy.setCenterText(text)
+        if STATUS.get_jog_increment() == 0:
+            ACTION.ensure_mode(linuxcnc.MODE_MANUAL)
+            ACTION.DO_JOG(axis, 0)
+
+    def jog_az_released(self, btn):
+        if btn == "C": return
+        if btn in "LR" and not "A" in self.axis_list: return
+        axis = 'A' if btn in "LR" else 'Z'
+        self.w.jog_az.set_highlight(axis, False)
+        text = "SLOW" if self.slow_angular_jog is True else "FAST"
+        self.w.jog_az.setCenterText(text)
+        inc = STATUS.get_jog_increment_angular() if axis == 'A' else STATUS.get_jog_increment()
+        if inc == 0:
+            ACTION.ensure_mode(linuxcnc.MODE_MANUAL)
+            ACTION.DO_JOG(axis, 0)
+            
+    def use_mpg_changed(self, state):
+        self.h['mpg-disable'] = not state
+        self.w.mpg_increment.setVisible(state)
+
+    # TOOL frame
+    def choose_tool(self):
+        self.w.lineEdit_tool_in_spindle.clearFocus()
+        mess = {'NAME' : self.tool_code,
+                'ID' : '_toolchooser_'}
+        STATUS.emit('dialog-request', mess)
+
+    def btn_touchoff_pressed(self):
+        if STATUS.get_current_tool() == 0:
+            self.add_status("Cannot touchoff with no tool loaded", WARNING)
+            return
+        if not STATUS.is_all_homed():
+            self.add_status("Must be homed to perform tool touchoff", WARNING)
+            return
+        if self.w.chk_touchplate.isChecked():
+            self.touchoff('touchplate')
+        elif self.w.chk_auto_toolsensor.isChecked():
+            self.touchoff('toolsensor')
+        elif self.w.chk_manual_toolsensor.isChecked():
+            self.touchoff('manual')
+        else:
+            self.add_status("Invalid touchoff method specified", WARNING)
+
+    # DRO frame
+    def systemtoolbutton_toggled(self, state):
+        if state:
+            STATUS.emit('dro-reference-change-request', 1)
+
+    def btn_home_all_clicked(self, obj):
+        if not STATUS.is_all_homed():
+            ACTION.SET_MACHINE_HOMING(-1)
+        else:
+        # instantiate dialog box
+            mess = {'NAME': 'MESSAGE',
+                    'ID': '_unhome_',
+                    'MESSAGE': 'UNHOME ALL',
+                    'GEONAME': '__message',
+                    'MORE': "Unhome All Axes?",
+                    'NONBLOCKING': True,
+                    'TYPE': 'YESNO'}
+            STATUS.emit('dialog-request', mess)
+
+    def btn_rewind_clicked(self):
+        stat = linuxcnc.stat()
+        stat.poll()
+        pos = stat.actual_position[3]
+        joint = self.jog_from_name['A']
+        frac = (pos + 180) % 360
+        frac -= 180
+        cmd = f"""G91
+        G0 A-{frac}
+        G90"""
+        ACTION.CALL_MDI_WAIT(cmd, 10)
+        ACTION.SET_MACHINE_HOMING(joint)
+        self.add_status("Rotary axis rewound to 0")
+
+    def btn_goto_location_clicked(self):
+        dest = self.w.sender().property('location')
+        if dest == 'zero':
+            ACTION.CALL_MDI_WAIT('G90 G53 G0 Z0\nG0 X0 Y0', time=30, mode_return=True)
+        elif dest in ['home', 'sensor']:
+            x = self.w[f'lineEdit_{dest}_x'].text()
+            y = self.w[f'lineEdit_{dest}_y'].text()
+            ACTION.CALL_MDI_WAIT(f'G90 G53 G0 Z0\nG53 G0 X{x} Y{y}', time=30, mode_return=True)
+
+    def btn_ref_laser_clicked(self):
+        if not self.w.btn_laser_on.isChecked():
+            self.add_status('Laser is off, offset not set', WARNING)
+            return
+        x = float(self.w.lineEdit_laser_x.text())
+        y = float(self.w.lineEdit_laser_y.text())
+        if INFO.MACHINE_IS_METRIC and not STATUS.is_metric_mode():
+            x = x / 25.4
+            y = y / 25.4
+        command = f"G10 L20 P0 X{x:3.4f} Y{y:3.4f}"
+        ACTION.CALL_MDI(command)
+        self.add_status("Laser offsets set")
+
+    def btn_ref_camera_clicked(self):
+        x = float(self.w.lineEdit_camera_x.text())
+        y = float(self.w.lineEdit_camera_y.text())
+        if not STATUS.is_metric_mode():
+            x = x / 25.4
+            y = y / 25.4
+        command = f"G10 L20 P0 X{x:3.4f} Y{y:3.4f}"
+        ACTION.CALL_MDI(command)
+        self.add_status("Camera offsets set")
+
+    # override frame
+    # this only works if jog adjusters are sliders
+    def btn_linear_fast_clicked(self, state):
+        self.slow_linear_jog = state
+        step = 1 if state else 10
+        page = 10 if state else 100
+        if state is True:
+            value  = int(self.w.adj_linear_jog.value()   / self.slow_jog_factor)
+            maxval = int(self.w.adj_linear_jog.maximum() / self.slow_jog_factor)
+        else:
+            value  = int(self.w.adj_linear_jog.value()   * self.slow_jog_factor)
+            maxval = int(self.w.adj_linear_jog.maximum() * self.slow_jog_factor)
+        self.w.adj_linear_jog.setMaximum(maxval)
+        self.w.adj_linear_jog.setValue(value)
+        self.w.adj_linear_jog.setSingleStep(step)
+        self.w.adj_linear_jog.setPageStep(page)
+
+    # this only works if jog adjusters are sliders
+    def btn_angular_fast_clicked(self, state):
+        self.slow_angular_jog = state
+        step = 1 if state else 10
+        page = 10 if state else 100
+        if state is True:
+            value =  int(self.w.adj_angular_jog.value()   / self.slow_jog_factor)
+            maxval = int(self.w.adj_angular_jog.maximum() / self.slow_jog_factor)
+        else:
+            value =  int(self.w.adj_angular_jog.value()   * self.slow_jog_factor)
+            maxval = int(self.w.adj_angular_jog.maximum() * self.slow_jog_factor)
+        self.w.adj_angular_jog.setMaximum(maxval)
+        self.w.adj_angular_jog.setValue(value)
+        self.w.adj_angular_jog.setSingleStep(step)
+        self.w.adj_angular_jog.setPageStep(page)
+
+    def preset_jograte(self, btn):
+        if btn == self.w.btn_linear_50:
+            self.w.adj_linear_jog.setValue(int(self.default_linear_jog_vel / 2))
+        elif btn == self.w.btn_linear_100:
+            self.w.adj_linear_jog.setValue(self.default_linear_jog_vel)
+        elif btn == self.w.btn_angular_50:
+            self.w.adj_angular_jog.setValue(int(self.default_angular_jog_vel / 2))
+        elif btn == self.w.btn_angular_100:
+            self.w.adj_angular_jog.setValue(self.default_angular_jog_vel)
+
+    # FILE tab
+    def copy_file(self):
+        if self.w.sender() == self.w.btn_copy_right:
+            source = self.w.filemanager_usb.getCurrentSelected()
+            target = self.w.filemanager_user.getCurrentSelected()
+        elif self.w.sender() == self.w.btn_copy_left:
+            source = self.w.filemanager_user.getCurrentSelected()
+            target = self.w.filemanager_usb.getCurrentSelected()
+        else:
+            return
+        if source[1] is False:
+            self.add_status("Specified source is not a file", WARNING)
+            return
+        self.source_file = source[0]
+        if target[1] is True:
+            self.destination_file = os.path.join(os.path.dirname(target[0]), os.path.basename(source[0]))
+        else:
+            self.destination_file = os.path.join(target[0], os.path.basename(source[0]))
+        self.filemanager.copyChecks(self.source_file, self.destination_file)
+
+    def load_file(self):
+        fname = self.filemanager.getCurrentSelected()
+        if fname[1] is False:
+            self.add_status("Current selection is not a file", WARNING)
+            return
+        fname = fname[0]
+        filename, file_extension = os.path.splitext(fname)
+        if not INFO.program_extension_valid(fname):
+            self.add_status(f"Unknown or invalid filename extension {file_extension}", WARNING)
+            return
+        if file_extension in ('.ngc', '.nc', '.tap'):
+            ACTION.OPEN_PROGRAM(fname)
+            self.w.main_tab_widget.setCurrentIndex(TAB_MAIN)
+            self.w.btn_main.setChecked(True)
+            self.w.groupBox_preview.setTitle(self.w.btn_main.property('title'))
+            self.filemanager.recordBookKeeping()
+        elif file_extension == '.html':
+            self.setup_utils.show_html(fname)
+            self.add_status(f"Loaded HTML file : {fname}")
+        elif file_extension == '.pdf':
+            self.setup_utils.show_pdf(fname)
+            self.add_status(f"Loaded PDF file : {fname}")
+        elif file_extension == '.txt':
+            self.setup_utils.show_text(fname)
+            self.add_status(f"Loaded text file : {fname}")
+        else:
+            self.add_status(f"No action for {fname}", WARNING)
+
+    def delete_file(self):
+        fname = self.filemanager.getCurrentSelected()
+        text = 'FILE' if fname[1] is True else 'FOLDER'
+        self.deleteFile = fname[0]
+        info = f"{self.deleteFile} will be moved to system Trash folder"
+        mess = {'NAME': 'MESSAGE', 
+                'ICON': 'WARNING',
+                'ID': '_delete_',
+                'MESSAGE': f'DELETE {text}?',
+                'MORE': info,
+                'TYPE': 'YESNO',
+                'NONBLOCKING': True}
+        STATUS.emit('dialog-request', mess)
+
+    def deleteReturn(self):
+        try:
+            send2trash(self.deleteFile)
+            self.filemanager.textLine.clear()
+            self.add_status(f"{self.deleteFile} sent to Trash")
+        except Exception as e:
+            self.add_status(f"Delete file error: {e}", ERROR)
+
+    def rename_file(self):
+        fname = self.filemanager.getCurrentSelected()
+        title = "Rename File" if fname[1] is True else "Rename Folder"
+        self.source_file = fname[0]
+        mess = {'NAME': self.kbd_code,
+                'ID': '_rename_',
+                'PRELOAD': self.source_file,
+                'TITLE': title,
+                'NONBLOCKING': True,
+                'GEONAME': '__keyboard'}
+        STATUS.emit('dialog-request', mess)
+
+    def new_file(self):
+        fname = self.filemanager.getCurrentSelected()
+        if fname[1]:
+            preload = os.path.join(os.path.dirname(fname[0]), 'new.ngc')
+        else:
+            preload = os.path.join(fname[0], 'new.ngc')
+        mess = {'NAME': self.kbd_code,
+                'ID': '_new_file_',
+                'PRELOAD': preload,
+                'TITLE': 'Create New Empty File',
+                'NONBLOCKING': True,
+                'GEONAME': '__keyboard'}
+        STATUS.emit('dialog-request', mess)
+
+    def fileReturn(self, name):
+        with open(name, 'w'):
+            pass
+        self.add_status(f"File {name} created successfully")
+
+    def new_folder(self):
+        fname = self.filemanager.getCurrentSelected()
+        if fname[1]:
+            preload = os.path.join(os.path.dirname(fname[0]), 'new_folder')
+        else:
+            preload = os.path.join(fname[0], 'new_folder')
+        mess = {'NAME': self.kbd_code,
+                'ID': '_new_folder_',
+                'PRELOAD': preload,
+                'TITLE': 'Create New Folder',
+                'NONBLOCKING': True,
+                'GEONAME': '__keyboard'}
+        STATUS.emit('dialog-request', mess)
+
+    def folderReturn(self, name):
+        try:
+            os.makedirs(name, exist_ok = False)
+            self.add_status(f"Folder {name} created successfully")
+        except Exception as e:
+            self.add_status(f"Folder create error: {e}", WARNING)
+
+    def edit_gcode(self):
+        self.w.gcodeeditor.editor.setModified(False)
+        self.w.gcodeeditor.editMode()
+        if self.current_loaded_program:
+            self.w.gcodeeditor.label.setText(f'  Editing {self.current_loaded_program}')
+
+    def select_filemanager(self, state):
+        self.filemanager = self.w.filemanager_user if state else self.w.filemanager_usb
+
+    # GCode Editor override functions
+    def openReturn(self, fname):
+        filename, file_extension = os.path.splitext(fname)
+        if file_extension in ('.ngc', '.nc', '.tap'):
+            self.w.gcodeeditor.editor.load_text(fname)
+            self.w.gcodeeditor.label.setText(f'  Editing {fname}')
+            self.w.gcodeeditor.editor.setModified(False)
+        else:
+            self.add_status(f"{fname} is not a valid gcode file - not opened")
+
+    def saveReturn(self, fname):
+        saved = ACTION.SAVE_PROGRAM(self.w.gcodeeditor.editor.text(), fname)
+        if saved is not None:
+            self.w.gcodeeditor.editor.setModified(False)
+
+    def exitCall(self):
+        exit_ok = True
+        if self.w.gcodeeditor.editor.isModified():
+            exit_ok = self.w.gcodeeditor.killCheck()
+        if exit_ok is True:
+            self.w.gcodeeditor.editor.setText('')
+            self.w.gcodeeditor.label.clear()
+            self.w.stacked_file.setCurrentIndex(0)
+            self.w.btn_file.setText('PROGRAMS')
+
+    # TOOL tab
+    def tabwidget_tools_changed(self, idx):
+        if idx == 0:
+            self.w.btn_add_tool.setEnabled(True)
+            self.w.btn_delete_tool.setEnabled(True)
+        else:
+            self.w.btn_add_tool.setEnabled(False)
+            self.w.btn_delete_tool.setEnabled(False)
+
+    def btn_add_tool_pressed(self):
+        if not STATUS.is_on_and_idle():
+            self.add_status("Status must be ON and IDLE", WARNING)
+            return
+        array = [self.next_available, self.next_available, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 'New Tool']
+        TOOL.ADD_TOOL(array)
+        if self.tool_db.add_tool(self.next_available) is True:
+            self.w.lineEdit_num_tools.setText(self.tool_db.get_tool_count())
+            self.add_status(f"Added new tool {self.next_available}")
+        else:
+            self.add_status('Failed to add tool to database', WARNING)
+        self.get_next_available()
+
+    def btn_delete_tool_pressed(self):
+        tools = self.get_checked_tools()
+        if not tools:
+            self.add_status("No tool selected to delete", WARNING)
+            return
+        tool = int(self.w.lineEdit_tool_in_spindle.text())
+        if tools[0] == tool:
+            ACTION.CALL_MDI('M61 Q0 G43', mode_return=True)
+        self.w.tooloffsetview.delete_tools()
+        self.add_status(f"Deleted tool {tools[0]}")
+        if self.tool_db.delete_tool(tools[0]) is True:
+            self.w.lineEdit_num_tools.setText(self.tool_db.get_tool_count())
+        else:
+            self.add_status(f'Failed to delete tool {tools[0]} from database', WARNING)
+        self.get_next_available()
+
+    def btn_load_tool_pressed(self):
+        if self.w.tabWidget_tools.currentIndex() == 0:
+            tool = self.get_checked_tools()
+            if len(tool) > 1:
+                self.add_status("Select only 1 tool to load", ERROR)
+            elif tool:
+                ACTION.CALL_MDI_WAIT(f'M61 Q{tool[0]} G43', mode_return=True)
+                self.update_tool_info(tool[0])
+                self.add_status(f"Tool {tool[0]} loaded")
+            else:
+                self.add_status("No tool selected", WARNING)
+        elif self.w.tabWidget_tools.currentIndex() == 1:
+            tool = self.tool_db.get_selected_tool()
+            if tool is None:
+                self.add_status('No tool selected in the database', WARNING)
+                return
+            ACTION.CALL_MDI_WAIT(f'M61 Q{tool} G43', mode_return=True)
+            self.update_tool_info(tool)
+            self.add_status(f"Tool {tool} loaded")
+
+    def btn_unload_tool_pressed(self):
+        ACTION.CALL_MDI_WAIT('M61 Q0 G43', mode_return=True)
+
+    # STATUS tab
+    def btn_clear_status_clicked(self):
+        STATUS.emit('update-machine-log', None, 'DELETE')
+
+    def btn_save_log_pressed(self):
+        text = self.w.machine_log.getLogText()
+        current_datetime = datetime.datetime.now()
+        timestamp = current_datetime.strftime("%Y%m%d_%H%M%S")
+        filename = f"status_{timestamp}.txt"
+        self.add_status(f"Saving Status log to {filename}")
+        with open(filename, 'w') as f:
+            f.write(text)
+
+    # CAMVIEW tab
+    def cam_zoom_changed(self, value):
+        self.w.camview.scale = float(value) / 10
+
+    def cam_dia_changed(self, value):
+        self.w.camview.diameter = value
+
+    def cam_rot_changed(self, value):
+        self.w.camview.rotation = float(value) / 10
+
+    # SETTINGS tab
+    def override_limits_changed(self, state):
+        # only toggle override if it's not in synch with the button
+        if state and not STATUS.is_limits_override_set():
+            self.add_status("Override limits set", WARNING)
+            ACTION.TOGGLE_LIMITS_OVERRIDE()
+        elif not state and STATUS.is_limits_override_set():
+            error = ACTION.TOGGLE_LIMITS_OVERRIDE()
+            # if override can't be released set the check button to reflect this
+            if error == False:
+                self.w.chk_override_limits.blockSignals(True)
+                self.w.chk_override_limits.setChecked(True)
+                self.w.chk_override_limits.blockSignals(False)
+            else:
+                self.add_status("Override limits not set")
+
+    def use_camera_changed(self, state):
+        self.w.btn_camera.setVisible(state)
+        self.w.btn_ref_camera.setEnabled(state)
+        self.w.camera_offset.setVisible(state)
+
+    def chk_run_from_line_changed(self, state):
+        if not state:
+            self.w.btn_cycle_start.setText('  CYCLE START')
+            self.start_line = 1
+
+    def touchoff_changed(self, state):
+        if not state: return
+        image = ''
+        if self.w.chk_touchplate.isChecked():
+            self.w.btn_touchoff.setText("  TOUCHPLATE")
+            self.w.btn_touchoff.setToolTip("Auto probe Z down to touchplate")
+            image = 'touch_plate.png'
+        elif self.w.chk_auto_toolsensor.isChecked():
+            self.w.btn_touchoff.setText("  AUTO TOUCHOFF")
+            self.w.btn_touchoff.setToolTip("Auto probe Z down to tool sensor")
+            image = 'tool_sensor.png'
+        elif self.w.chk_manual_toolsensor.isChecked():
+            self.w.btn_touchoff.setText("  MANUAL TOUCHOFF")
+            self.w.btn_touchoff.setToolTip("Set workpiece Z0")
+            image = 'tool_gauge.png'
+        if image:
+            image_file = os.path.join(PATH.CONFIGPATH, 'tool_icons/' + image)
+            self.w.lbl_touchoff_image.setPixmap(QPixmap(image_file))
+        self.w.lineEdit_touch_height.setReadOnly(not self.w.chk_touchplate.isChecked())
+        self.w.lineEdit_sensor_height.setReadOnly(not self.w.chk_auto_toolsensor.isChecked())
+        self.w.lineEdit_gauge_height.setReadOnly(not self.w.chk_manual_toolsensor.isChecked())
+
+    def auto_touchoff_changed(self, state):
+        v = 1 if state else 0
+        s = f'#<_auto_touchoff> = {v}'
+        ACTION.CALL_MDI(s)
+
+    def input_changed(self, val):
+        if val == 'sensor_height':
+            sh = self.w.lineEdit_sensor_height.text()
+            self.probe.set_ts_height(sh)
+        obj = self.w[f'lineEdit_{val}']
+        ACTION.CALL_MDI(f"#<_{val}> = {obj.text()}")
+        obj.clearFocus()
+
+    def status_duration_changed(self, value):
+        self.status_timeout = int(value * 1000)
+
+    #####################
+    # GENERAL FUNCTIONS #
+    #####################
+    def show_about(self):
+        fname = os.path.join(HELP, 'about.html')
+        self.setup_utils.show_help(fname)
+
+    def show_probe_help(self, fname):
+        self.setup_utils.show_help(fname)
+
+    def tool_data_changed(self, new, old, roles):
+        row = new.row()
+        col = new.column()
+        if col == 1:
+            old_list = self.tool_list
+            self.get_next_available()
+            new_list = self.tool_list
+            old_tno = list(set(old_list) - set(new_list))
+            new_tno = list(set(new_list) - set(old_list))
+            self.tool_number_changed(old_tno, new_tno)
+        elif col in (7, 15, 19):
+            array = TOOL.GET_TOOL_ARRAY()
+            line = array[row]
+            if not self.tool_db.update_tool_table(line[0], (line[4], line[11], line[15])):
+                self.add_status('Failed to update tool data to database', WARNING)
+
+    def tool_number_changed(self, old_tno, new_tno):
+        # no duplicate tools
+        if len(old_tno) > 0 and len(new_tno) > 0:
+            if self.tool_db.update_tool_no(old_tno[0], new_tno[0]) is True:
+                self.add_status(f'Changed database tool {old_tno[0]} to {new_tno[0]}')
+            else:
+                self.add_status('Failed to change tool number in database', WARNING)
+        # there are duplicate tools in the old list
+        elif len(old_tno) == 0 and len(new_tno) > 0:
+            array = [new_tno[0], new_tno[0], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 'New Tool']
+            TOOL.ADD_TOOL(array)
+            if self.tool_db.add_tool(new_tno[0]) is True:
+                self.w.lineEdit_num_tools.setText(self.tool_db.get_tool_count())
+                self.add_status(f'Added tool {new_tno[0]} to database')
+            else:
+                self.add_status(f'Failed to add tool {new_tno[0]} to database', WARNING)
+        # there are duplicate tools in the new list
+        elif len(old_tno) > 0 and len(new_tno) == 0:
+            if self.tool_db.delete_tool(old_tno[0]) is True:
+                self.w.lineEdit_num_tools.setText(self.tool_db.get_tool_count())
+                self.add_status(f'Deleted tool {old_tno[0]} from database')
+            else:
+                self.add_status(f'Failed to delete tool {tools[0]} from database', WARNING)
+        else:
+           pass
+            
+    def update_tool_info(self, tool):
+        data = self.tool_db.get_tool_data(tool)
+        if data is None:
+            self.add_status("Failed to retrieve data from database", ERROR)
+            return
+        maxz = data['length']
+        rtime = data['time']
+        icon = data['icon']
+        if icon is None or icon == "undefined":
+            self.w.lbl_tool_image.setText("Image\nUndefined")
+        else:
+            icon_file = os.path.join(PATH.CONFIGPATH, 'tool_icons/' + icon)
+            self.w.lbl_tool_image.setPixmap(QPixmap(icon_file))
+        text = "---" if maxz is None else str(maxz)
+        self.w.lineEdit_max_depth.setText(text)
+        self.pgm_start_time = rtime
+        self.w.lineEdit_acc_time.setText(f'{rtime:.1f}')
+
+    def get_checked_tools(self):
+        checked = self.w.tooloffsetview.get_checked_list()
+        return checked
+
+    def get_next_available(self):
+        array = TOOL.GET_TOOL_ARRAY()
+        tool_list = []
+        for line in array:
+            tool_list.append(line[0])
+        self.tool_list = tool_list
+        for tno in range(0, 100):
+            if tno not in tool_list: break
+        self.next_available = tno
+        self.w.lineEdit_next_available.setText(str(tno))
+
+    def max_power_edited(self):
+        power = int(self.w.lineEdit_max_power.text())
+        if power <= 0:
+            self.w.lineEdit_max_power.setText(str(self.max_spindle_power))
+            self.add_status("Max spindle power must be > 0 - discarding change", WARNING)
+        else:
+            self.max_spindle_power = power
+        self.w.lineEdit_max_power.clearFocus()
+
+    def show_selected_axis(self, obj):
+        if not STATUS.is_man_mode() or not STATUS.machine_is_on(): return
+        if self.w.chk_use_mpg.isChecked():
+            self.w.jog_xy.set_highlight('X', bool(self.h['axis-select-x'] is True))
+            self.w.jog_xy.set_highlight('Y', bool(self.h['axis-select-y'] is True))
+            self.w.jog_az.set_highlight('Z', bool(self.h['axis-select-z'] is True))
+            if 'A' in self.axis_list:
+                self.w.jog_az.set_highlight('A', bool(self.h['axis-select-a'] is True))
+
+    def touchoff(self, mode):
+        if mode == 'touchplate':
+            z_offset = self.w.lineEdit_touch_height.text()
+        elif mode == 'toolsensor':
+            z_offset = float(self.w.lineEdit_sensor_height.text()) - float(self.w.lineEdit_work_height.text())
+            z_offset = str(z_offset)
+        elif mode == "manual":
+            z_offset = float(self.w.lineEdit_sensor_height.text()) - float(self.w.lineEdit_work_height.text())
+            ACTION.CALL_MDI(f"G10 L20 P0 Z{z_offset:.3f}")
+            return            
+        else:
+            return
+        self.add_status(f"Touchoff to {mode} started")
+        search_vel = self.w.lineEdit_search_vel.text()
+        probe_vel = self.w.lineEdit_probe_vel.text()
+        max_probe = self.w.lineEdit_max_probe.text()
+        retract = self.w.lineEdit_retract.text()
+        safe_z = self.w.lineEdit_zsafe.text()
+        rtn = ACTION.TOUCHPLATE_TOUCHOFF(search_vel, probe_vel, max_probe, z_offset, retract, safe_z, \
+                                         self.touchoff_return, \
+                                         self.touchoff_error)
+        if rtn == 0:
+            self.add_status("Touchoff routine is already running", WARNING)
+
+    def touchoff_return(self, data):
+        if self.w.chk_auto_toolsensor.isChecked():
+            ACTION.CALL_MDI_WAIT('G53 G0 Z0', mode_return=True)
+        self.add_status("Touchoff routine returned success")
+            
+    def touchoff_error(self, data):
+        self.add_status(data, WARNING)
+        ACTION.SET_ERROR_MESSAGE(data)
+
+    def spindle_pause_timer(self):
+        if bool(self.h.hal.get_value('spindle.0.at-speed')):
+            self.h['eoffset-count'] = 0
+            self.w.btn_pause.setEnabled(True)
+            self.add_status("Spindle pause resumed")
+        else:
+            self.pause_timer.start(1000)
+        
+    def kb_jog(self, state, axis, direction):
+        if not STATUS.is_man_mode() or not STATUS.machine_is_on():
+            self.add_status('Machine must be ON and in Manual mode to jog', WARNING)
+            return
+        if state == 0: direction = 0
+        ACTION.DO_JOG(axis, direction)
+
+    def add_status(self, message, level=DEFAULT, noLog=False):
+        if level == WARNING:
+            self.w.statusbar.setStyleSheet(f"color: {WARNING_COLOR};")
+            message = 'WARNING: ' + message
+            self.w.statusbar.showMessage(message, self.status_timeout)
+            self.stat_warnings += 1
+            self.w.lbl_stat_warnings.setText(f'{self.stat_warnings}')
+        elif level == ERROR:
+            self.w.statusbar.setStyleSheet(f"color: {ERROR_COLOR};")
+            message = 'ERROR: ' + message
+            self.w.statusbar.showMessage(message, self.status_timeout)
+            self.stat_errors += 1
+            self.w.lbl_stat_errors.setText(f'{self.stat_errors}')
+        else:
+            self.w.statusbar.showMessage(message, self.status_timeout)
+            self.w.statusbar.setStyleSheet(self.statusbar_style)
+        if not message == "" and noLog is False:
+            STATUS.emit('update-machine-log', message, 'TIME')
+
+    def statusbar_changed(self, message):
+        if message == "":
+            self.w.statusbar.setStyleSheet(self.statusbar_style)
+
+    def btn_mdi_pressed(self):
+        self.w.stacked_gcode.setCurrentIndex(1)
+        if self.w.chk_use_mdi_keyboard.isChecked():
+            self.mdiPanel.show()
+
+    def enable_auto(self, state):
+        if not STATUS.machine_is_on(): return
+        if self.zlevel is not None:
+            self.w.btn_enable_comp.setEnabled(not state)
+        self.w.btn_goto_sensor.setEnabled(not state)
+        self.w.btn_goto_zero.setEnabled(not state)
+        self.w.btn_goto_home.setEnabled(not state)
+        self.w.btn_touchoff.setEnabled(not state)
+        self.w.btn_marker.setEnabled(not state)
+        self.w.groupBox_jog_pads.setEnabled(not state)
+        self.w.btn_cycle_start.setEnabled(state)
+        self.w.lineEdit_spindle_raise.setReadOnly(state)
+        if state:
+            self.w.btn_main.setChecked(True)
+            self.w.main_tab_widget.setCurrentIndex(TAB_MAIN)
+            self.w.cmb_program_history.setEnabled(False)
+            self.w.gcode_viewer.readOnlyMode()
+            self.w.stacked_gcode.setCurrentIndex(0)
+            if self.macros_open:
+                self.toggle_macros()
+        else:
+            i = 1 if STATUS.is_mdi_mode() else 0
+            self.w.stacked_gcode.setCurrentIndex(i)
+            self.w.cmb_program_history.setEnabled(i == 0)
+
+    def enable_onoff(self, state):
+        text = "ON" if state else "OFF"
+        self.add_status("Machine " + text)
+        self.h['eoffset-count'] = 0
+        if not state:
+            self.w.groupBox_jog_pads.setEnabled(False)
+            self.w.btn_cycle_start.setEnabled(False)
+
+    def set_start_line(self, line):
+        if self.w.chk_run_from_line.isChecked():
+            self.start_line = line
+            self.w.btn_cycle_start.setText(f"  CYCLE START\n  FROM LINE {self.start_line}")
+        else:
+            self.start_line = 1
+
+    def use_keyboard(self):
+        if self.w.chk_use_keyboard.isChecked():
+            return True
+        else:
+            self.add_status('Keyboard shortcuts are disabled', WARNING)
+            return False
+
+    def stop_timer(self):
+        self.w.lbl_feedrate.setStyleSheet(self.feedrate_style)
+        if self.h['runtime-start'] is True:
+            self.h['runtime-start'] = False
+            self.add_status(f"Run timer stopped at {self.w.lineEdit_runtime.text()}")
+            tool = int(self.w.lineEdit_tool_in_spindle.text())
+            if tool > 0:
+                tis = float(self.w.lineEdit_acc_time.text())
+                if self.tool_db.update_tool_time(tool, tis) is None:
+                    self.add_status(f'Update tool {tool} time in spindle error', WARNING)
+
+    def get_status(self):
+        status = {
+            "state": self.w.lbl_program_state.text(),
+            "program": self.current_loaded_program,
+            "progress": self.w.progressBar.value(),
+            "feed": self.w.lbl_feedrate.text(),
+            "rpm": self.h.hal.get_value('spindle.0.speed-out'),
+            "tool": int(self.w.lineEdit_tool_in_spindle.text()),
+            "runtime": self.w.lineEdit_runtime.text()}
+        return status
+
+    #####################
+    # KEY BINDING CALLS #
+    #####################
+
+    def on_keycall_ESTOP(self,event,state,shift,cntrl):
+        if state:
+            self.w.btn_estop.setChecked(False)
+
+    def on_keycall_POWER(self,event,state,shift,cntrl):
+        if state:
+            ACTION.SET_MACHINE_STATE(not STATUS.machine_is_on())
+
+    def on_keycall_ABORT(self,event,state,shift,cntrl):
+        if state:
+            ACTION.ABORT()
+
+    def on_keycall_HOME(self,event,state,shift,cntrl):
+        if state and not STATUS.is_all_homed() and self.use_keyboard():
+            ACTION.SET_MACHINE_HOMING(-1)
+
+    def on_keycall_PAUSE(self,event,state,shift,cntrl):
+        if state and self.use_keyboard():
+            self.btn_pause_pressed()
+
+    def on_keycall_XPOS(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'X', 1)
+
+    def on_keycall_XNEG(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'X', -1)
+
+    def on_keycall_YPOS(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'Y', 1)
+
+    def on_keycall_YNEG(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'Y', -1)
+
+    def on_keycall_ZPOS(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'Z', 1)
+
+    def on_keycall_ZNEG(self,event,state,shift,cntrl):
+        if self.use_keyboard():
+            self.kb_jog(state, 'Z', -1)
+    
+    def on_keycall_APOS(self,event,state,shift,cntrl):
+        if self.use_keyboard() and 'A' in self.axis_list:
+            self.kb_jog(state, 'A', 1)
+
+    def on_keycall_ANEG(self,event,state,shift,cntrl):
+        if self.use_keyboard() and 'A' in self.axis_list:
+            self.kb_jog(state, 'A', -1)
+
+    def on_keycall_F4(self,event,state,shift,cntrl):
+        if state:
+            mess = {'NAME':self.dialog_code, 'TITLE':'Calculator', 'ID':'_calculator_'}
+            STATUS.emit('dialog-request', mess)
+
+    def on_keycall_F12(self,event,state,shift,cntrl):
+        if state:
+            self.styleeditor.load_dialog()
+
+    # intercept this call to define gcodegraphics gradient colors
+    def setStyleSheet(self, style):
+        QApplication.instance().setStyleSheet(style)
+        found1 = found2 = None
+        color1 = QRegExp("gradient_color1")
+        color2 = QRegExp("gradient_color2")
+        for i, line in enumerate(style.splitlines()):
+            if color1.indexIn(line) != -1:
+                found1 = line
+                break
+        for i, line in enumerate(style.splitlines()):
+            if color2.indexIn(line) != -1:
+                found2 = line
+                break
+        if found1 is None or found2 is None:
+            return
+        gradient1 = found1.split("=")[1].strip()
+        value1 = tuple(float(x) for x in gradient1.strip('()').split(','))
+        gradient2 = found2.split("=")[1].strip()
+        value2 = tuple(float(x) for x in gradient2.strip('()').split(','))
+        self.w.gcodegraphics.gradient_color1 = value1
+        self.w.gcodegraphics.gradient_color2 = value2
+        self.get_current_style()
+
+    def get_current_style(self):
+        loaded_style = self.styleeditor.styleSheetCombo.currentText()
+        if loaded_style == 'As Loaded':
+            loaded_style = self.w.PREFS_.getpref('style_QSS_Path', 'As Loaded', str, 'BOOK_KEEPING')
+            loaded_style = os.path.basename(loaded_style)
+        self.w.lbl_style.setText(f'STYLESHEET - {loaded_style}')
+
+    ##############################
+    # required class boiler code #
+    ##############################
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def __setitem__(self, item, value):
+        return setattr(self, item, value)
+
+################################
+# required handler boiler code #
+################################
+
+def get_handlers(halcomp, widgets, paths):
+    return [HandlerClass(halcomp, widgets, paths)]
