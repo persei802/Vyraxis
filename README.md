@@ -1,2 +1,3 @@
 # Vyraxis
-Successor to QtDragon_hd
+# Graphical User Interface for LinuxCNC powered CNC machines. Built on qtvcp framework.
+
