@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QtDragon Documentation</title>
+  <title>Vyraxis Documentation</title>
   <link href="help.css" rel="stylesheet">
 </head>
 <body>
@@ -24,37 +24,37 @@
 </ul>
 
 <h1 id="mpg">USING A MPG</h1>
-<p>The QtDragon interface allows for the use of an external Manual Pulse Generator (MPG) by checking the Enable MPG Jogging checkbox 
+<p>The Vyraxis interface allows for the use of an external Manual Pulse Generator (MPG) by checking the Enable MPG Jogging checkbox 
 on the SETTINGS page.</p>
-<p>A separate HAL file is used to define I/O pins that connect to the MPG and the <i>qtdragon_postgui.hal</i>
-is used to make the connections to the QtDragon HAL pins.</p>
+<p>A separate HAL file is used to define I/O pins that connect to the MPG and the <i>vyraxis_postgui.hal</i>
+is used to make the connections to the Vyraxis HAL pins.</p>
 <h2>AXIS SELECT</h2>
 <p>Four HAL input pins are created to connect the MPG selected axis signals to the Jog joypad highlight segments to indicate
 which axis is being jogged with the MPG. </p>
 <h2>SCALE SELECT</h2>
 <p>A HAL float input pin is created to allow the handler file to display the currently selected jog scale setting of the MPG.
 Connections from the MPG to a mux4 HAL component are made in a <i>mpg.hal</i> file and the output of the mux4 is connected
-to QtDragon in order to display the currently selected MPG jog increment. If the MPG's pulse outputs are quadrature encoded, the
+to Vyraxis in order to display the currently selected MPG jog increment. If the MPG's pulse outputs are quadrature encoded, the
 scale value inputs to the MUX4 component should be the desired step size divided by 4.</p>
 <h2>MPG DISABLE</h2>
 <p>A HAL output pin is created to disable the MPG encoder if the Enable MPG Jogging checkbox is unchecked. Note that this does not
 actually disable the MPG, but is used to disable the encoder on a Mesa ethernet card, if one is used. This will also hide the 
-MPG Scale display from the QtDragon screen.</p>
+MPG Scale display from the Vyraxis screen.</p>
 
 <h1 id="vfd">USING A VFD</h1>
-<p>QtDragon was designed to communicate with a VFD via modbus. A custom HAL component provides the modbus interface 
-between QtDragon and a Huanyang GT Series VFD.
-<p>To implement modbus communication, the following HAL connections must be added to the qtdragon_postgui.hal file:</p>
+<p>Vyraxis was designed to communicate with a VFD via modbus. A custom HAL component provides the modbus interface 
+between Vyraxis and a Huanyang GT Series VFD.
+<p>To implement modbus communication, the following HAL connections must be added to the vyraxis_postgui.hal file:</p>
 
 <div class="code-block">
     <pre class="hal">loadusr -Wn hy_gt_vfd hy_gt_vfd.py -S 24000 -F 400 -f 120 -d /dev/ttyUSB0 [other options]</pre>
     <pre class="hal">net spindle-on       hy_gt_vfd.spindle-on <= spindle.0.on</pre>
     <pre class="hal">net spindle-fb       hy_gt_vfd.speed-fb => spindle.0.speed-in</pre>
     <pre class="hal">net spindle-cmd      hy_gt_vfd.speed-cmd <= spindle.0.speed-out-abs</pre>
-    <pre class="hal">net spindle-amps     hy_gt_vfd.output-current => qtdragon.spindle-amps</pre>
-    <pre class="hal">net spindle-volts    hy_gt_vfd.output-voltage => qtdragon.spindle-volts</pre>
-    <pre class="hal">net spindle-fault    hy_gt_vfd.fault-info-code => qtdragon.modbus-fault</pre>
-    <pre class="hal">net modbus-errors    hy_gt_vfd.modbus-errors => qtdragon.modbus-errors</pre>
+    <pre class="hal">net spindle-amps     hy_gt_vfd.output-current => vyraxis.spindle-amps</pre>
+    <pre class="hal">net spindle-volts    hy_gt_vfd.output-voltage => vyraxis.spindle-volts</pre>
+    <pre class="hal">net spindle-fault    hy_gt_vfd.fault-info-code => vyraxis.modbus-fault</pre>
+    <pre class="hal">net modbus-errors    hy_gt_vfd.modbus-errors => vyraxis.modbus-errors</pre>
 </div>
 
 <p>Other optional arguments for hy_gt_vfd.py are:</p>
@@ -68,8 +68,8 @@ between QtDragon and a Huanyang GT Series VFD.
 <p>The spindle gauge widget is connected with:</p>
 
 <div class="code-block">
-    <pre class="hal">net spindle-cmd     qtdragon.gauge_spindle_setpoint</pre>
-    <pre class="hal">net spindle-fb      qtdragon.gauge_spindle_value</pre>
+    <pre class="hal">net spindle-cmd     vyraxis.gauge_spindle_setpoint</pre>
+    <pre class="hal">net spindle-fb      vyraxis.gauge_spindle_value</pre>
 </div>
 
 <h3>Default Parameters</h3>
@@ -88,7 +88,7 @@ it is likely that you need to add your username to the dialout group.
 <p>Then logout and log back in.</p>
 
 <h1 id="spindle">SPINDLE PAUSE</h1>
-<p>QtDragon can be set up to automatically raise the Z axis and stop the spindle when the program is paused.
+<p>Vyraxis can be set up to automatically raise the Z axis and stop the spindle when the program is paused.
 On program RESUME, the spindle is restarted and lowered after a set time delay. The amount of lift and time 
 delay are entered in fields in the SETTINGS -> SPINDLE page. To enable spindle pause, press the SPINDLE PAUSE 
 button before going into AUTO mode to run a program. Once AUTO mode is enabled, this button is inactive.
@@ -102,7 +102,7 @@ before the pause. This allows the spindle to resume it's operating speed before 
 workpiece. A countdown is displayed in the PROGRAM RUNTIME label to indicate when the program can be resumed.</p>
 <p>If the LIMIT LED lights up, the Z axis didn’t move the full distance due to axis travel limitations. However, it 
 will still return to the proper Z level when the program is resumed.</p>
-<p>This optional behaviour requires additions to the INI and the QtDragon_postgui HAL file.</p>
+<p>This optional behaviour requires additions to the INI and the vyraxis_postgui HAL file.</p>
 <div class="code-block">
     <pre class="hal">[AXIS_Z]</pre>
     <pre class="hal">OFFSET_AV_RATIO = 0.2</pre>
@@ -114,8 +114,8 @@ This will limit max velocity of the machine by 20%.</p>
 <div class="code-block">
     <pre class="hal">## external offsets for spindle pause function</pre>
     <pre class="hal">net eoffset-clear   axis.z.eoffset-clear   <= compensate.clear</pre>
-    <pre class="hal">net eoffset-count   axis.z.eoffset-counts  <= qtdragon.eoffset-count</pre>
-    <pre class="hal">net eoffset         qtdragon.eoffset-value <= axis.z.eoffset</pre>
+    <pre class="hal">net eoffset-count   axis.z.eoffset-counts  <= vyraxis.eoffset-count</pre>
+    <pre class="hal">net eoffset         vyraxis.eoffset-value <= axis.z.eoffset</pre>
     <pre class="hal">setp axis.z.eoffset-scale 0.001</pre>
     <pre class="hal">setp axis.z.eoffset-enable True</pre>
 </div>
@@ -138,7 +138,7 @@ and speed to be preset.
 </div>
 
 <h1 id="touchoff">TOOL TOUCHOFF</h1>
-<p>This section describes how QtDragon is used to set the tool tip to Z0 in user workspace. For machines
+<p>This section describes how Vyraxis is used to set the tool tip to Z0 in user workspace. For machines
 that use premeasured tools and have Tool Length Offsets (TLO) programmed into the LinuxCNC tool table, these
 functions can be used to measure the tool lengths relative to a reference tool or relative to a gage line,
 but the topic of TLOs and G43 compensation is beyond the scope of this document.</p>
@@ -199,7 +199,7 @@ result in a broken tool, a ruined workpiece or damage to the machine.</td>
 </div>
 
 <h1 id="stylesheet">STYLESHEETS</h1>
-<p>The appearance of the widgets in the QtDragon UI can be customized through the use of stylesheets. Upon 
+<p>The appearance of the widgets in the Vyraxis UI can be customized through the use of stylesheets. Upon 
 initialization, QTVCP searches for stylesheets in the users HANDLER folder. If none are found, it will apply 
 a default style from the /usr/share/qtvcp directory. To change the current style, press <button>F12</button> 
 (while the UI has focus) and interact with QTVCP's stylesheet editor dialog. This allows a user to easily 
@@ -215,7 +215,7 @@ can be updated by redefining the variable definitions in the top level file.
 <h1 id="rotary">ROTARY AXIS</h1>
 <p>Some CAM tools provide a function to create wrapped toolpaths to enable machining on a cylinder. The wrapped axis is generally 
 assigned to the A axis. However, feedrate commands in the gcode apply to linear and angular axes alike. This can make for very slow
-movements of the A, or rotary, axis. To remedy this, QtDragon provides a utility in the UTILS page to convert gcodes from G94 (distance
+movements of the A, or rotary, axis. To remedy this, Vyraxis provides a utility in the UTILS page to convert gcodes from G94 (distance
 per unit time) to G93 (inverse time mode). This allows the rotary gcode movements to travel at the same rate as linear moves.</p>
 <p>In the SETTINGS page under TOUCHOFF tab is a parameter called Rotary Axis Height. This is the height from the machine table to the 
 centerline of the rotary axis, assuming the rotary axis is mounted on the machine table. Normally, this would be the Z0 value. </p>
@@ -225,13 +225,13 @@ axis height.</p>
 <p>When Linuxcnc is first started, all axes must be homed. This causes the A0 location to be wherever the rotary axis was positioned when
 it was powered on. To change the A0 point, jog the rotary axis to the desired rotation and then rehome axis A. Sometimes a rotary job may
 cause the the A axis to rotate in the same direction for hundreds, even thousands of times. Rewinding to A0 would be very time 
-consuming and inconvenient. To address this, QtDragon has a <button>REWIND TO ZERO</button> button for the 
+consuming and inconvenient. To address this, Vyraxis has a <button>REWIND TO ZERO</button> button for the 
 rotary axis. When this button is pressed, the A axis rotates to the A0 position and rehomes. </p>
 <center><img src="images/rotary_axis.png" alt="rotary_axis" width="500"></img></center>
 
 <h1 id="remote">REMOTE STATUS MONITOR</h1>
 <p>It is sometimes useful to check on the status of a running gcode program from a remote location.
-QtDragon includes a class to generate a web server that can be accessed by any web browser. It provides
+Vyraxis includes a class to generate a web server that can be accessed by any web browser. It provides
 a rudimentary view of the status of the CNC machine.</p>
 
 <figure class="center">

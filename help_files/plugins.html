@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QtDragon Documentation</title>
+  <title>Vyraxis Documentation</title>
   <link href="help.css" rel="stylesheet">
 </head>
 <body id="top">
@@ -237,7 +237,7 @@ is written to the file specified by OUTPUT FILE.</p>
 <p>The converted file is loaded into Linuxcnc. </p>
 
 <h1 id="zlevel">Z LEVEL COMP UTILITY</h1>
-<p>QtDragon can compensate for Z level height changes using it's own gcode generation code for probing. 
+<p>Vyraxis can compensate for Z level height changes using it's own gcode generation code for probing. 
 An external program like G-code Ripper is not required, but can be used if so desired.</p>
 <p>Z level compensation is a bed levelling/distortion correction function typically used in 3D printing or engraving.
 It uses a HAL non-realtime component which utilizes the external offsets feature of LinuxCNC.</p>
@@ -275,8 +275,8 @@ applied if Z Compensation is enabled.</p>
 <h3>Sample postgui HAL file for combined spindle raise and Z Level compensation</h3>
 <div class="code-block">
     <pre class="hal"># load a summing component for adding spindle lift and Z compensation</pre>
-    <pre class="hal">loadrt scaled_s32_sums</pre>
-    <pre class="hal">addf scaled-s32-sums.0 servo-thread</pre>
+    <pre class="hal">loadrt scaled_sint_sums</pre>
+    <pre class="hal">addf scaled-sint-sums.0 servo-thread</pre>
     <pre class="hal"> </pre>
     <pre class="hal">loadusr -Wn compensate python3 lib/compensate.py</pre>
     <pre class="hal"> </pre>
@@ -285,10 +285,10 @@ applied if Z Compensation is enabled.</p>
     <pre class="hal">setp compensate.scale 1000</pre>
     <pre class="hal"> </pre>
     <pre class="hal"># add Z level and scaled spindle raise level values together</pre>
-    <pre class="hal">net eoffset-count    scaled-s32-sums.0.in0   <= qtdragon.eoffset-count</pre>
-    <pre class="hal">net comp-count       scaled-s32-sums.0.in1   => compensate.counts</pre>
-    <pre class="hal">net zaxis-eoffset    scaled-s32-sums.0.out-s => axis.z.eoffset-counts</pre>
-    <pre class="hal">setp scaled-s32-sums.0.scale0 1000</pre>
+    <pre class="hal">net eoffset-count    scaled-sint-sums.0.in0   <= vyraxis.eoffset-count</pre>
+    <pre class="hal">net comp-count       scaled-sint-sums.0.in1   => compensate.counts</pre>
+    <pre class="hal">net zaxis-eoffset    scaled-sint-sums.0.out-s => axis.z.eoffset-counts</pre>
+    <pre class="hal">setp scaled-sint-sums.0.scale0 1000</pre>
     <pre class="hal">setp axis.z.eoffset-enable True</pre>
     <pre class="hal">setp axis.z.eoffset-scale 0.001</pre>
 </div>
