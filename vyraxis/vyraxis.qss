@@ -214,12 +214,11 @@ QMenu::separator { height: 1px; background: #2b3644; margin: 4px 8px; }
 /** Plain Text Edit **/
 QTextEdit, QPlainTextEdit {
   background: #0a0e13;
-  color: #b9c6d4;
+  color: #c5cfdb;
   border: 1px solid #2b3644;
   border-radius: 3px;
   selection-background-color: #3b5c78;
   padding: 4px;
- font: 10pt "Lato";
  }
 QTextEdit:focus, QPlainTextEdit:focus { border-color: #4a7394; }
 
@@ -327,7 +326,7 @@ QScrollBar::handle:hover   { background: #4b5c70; }
 QScrollBar::handle:pressed { background: #5b86a8; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; background: none; border: none; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-
+QAbstractScrollArea::corner { background: #0c1016; }
 QScrollBar::add-line:horizontal {
   background: transparent;
   subcontrol-position: right;

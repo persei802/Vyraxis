@@ -513,9 +513,15 @@ class HandlerClass:
         self.macros_open = False
         self.w.btn_marker.setText("◀")
         self.w.frm_macro_buttons.setMaximumWidth(0)
-        self.animation = QPropertyAnimation(self.w.frm_macro_buttons, b"maximumWidth")
-        self.animation.setDuration(300)
-        self.animation.setEasingCurve(QEasingCurve.InOutCubic)
+        self.macro_animation = QPropertyAnimation(self.w.frm_macro_buttons, b"maximumWidth")
+        self.macro_animation.setDuration(300)
+        self.macro_animation.setEasingCurve(QEasingCurve.InOutCubic)
+        # sliding usb_files groupBox
+        self.usb_files_open = True
+        self.w.btn_hide_usb.setText("◀")
+        self.usb_animation = QPropertyAnimation(self.w.groupBox_usb, b"maximumWidth")
+        self.usb_animation.setDuration(300)
+        self.usb_animation.setEasingCurve(QEasingCurve.InOutCubic)
         # fetch current stylesheet to show in SETTINGS page
         self.get_current_style()
 
@@ -1066,16 +1072,16 @@ class HandlerClass:
 
     def toggle_macros(self):
         if self.macros_open:
-            self.animation.setStartValue(self.w.frm_macro_buttons.width())
-            self.animation.setEndValue(0)
+            self.macro_animation.setStartValue(self.w.frm_macro_buttons.width())
+            self.macro_animation.setEndValue(0)
             self.w.btn_marker.setText("◀")
             self.macros_open = False
         else:
-            self.animation.setStartValue(self.w.frm_macro_buttons.width())
-            self.animation.setEndValue(200)
+            self.macro_animation.setStartValue(self.w.frm_macro_buttons.width())
+            self.macro_animation.setEndValue(200)
             self.w.btn_marker.setText("▶")
             self.macros_open = True
-        self.animation.start()
+        self.macro_animation.start()
 
     def macro_btn_pressed(self, idx):
         cmds = self.w[f'btn_macro{idx}'].property('ini_mdi_cmd').split(';')
@@ -1387,6 +1393,21 @@ class HandlerClass:
             self.w.adj_angular_jog.setValue(self.default_angular_jog_vel)
 
     # FILE tab
+    def expand_user_files(self):
+        if self.usb_files_open:
+            self.usb_animation.setStartValue(self.w.groupBox_usb.width())
+            self.usb_animation.setEndValue(0)
+            self.w.btn_hide_usb.setText("▶")
+            self.usb_files_open = False
+        else:
+            self.usb_animation.setStartValue(0)
+            self.usb_animation.setEndValue(800)
+            self.w.btn_hide_usb.setText("◀")
+            self.usb_files_open = True
+        self.w.btn_copy_left.setEnabled(self.usb_files_open)
+        self.w.btn_copy_right.setEnabled(self.usb_files_open)
+        self.usb_animation.start()
+
     def copy_file(self):
         if self.w.sender() == self.w.btn_copy_right:
             source = self.w.filemanager_usb.getCurrentSelected()
@@ -1873,6 +1894,7 @@ class HandlerClass:
         if not STATUS.machine_is_on(): return
         if self.zlevel is not None:
             self.w.btn_enable_comp.setEnabled(not state)
+        self.w.widget_main_menu.setEnabled(not state)
         self.w.btn_goto_sensor.setEnabled(not state)
         self.w.btn_goto_zero.setEnabled(not state)
         self.w.btn_goto_home.setEnabled(not state)

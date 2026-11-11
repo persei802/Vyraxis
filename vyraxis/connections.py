@@ -32,6 +32,7 @@ class Connections():
         self.w.btn_touchoff.pressed.connect(self.parent.btn_touchoff_pressed)
         # file page buttons
         # some buttons use clicked instead of pressed because qtvcp dialogs suppress mouse release events
+        self.w.btn_hide_usb.pressed.connect(self.parent.expand_user_files)
         self.w.btn_copy_right.pressed.connect(self.parent.copy_file)
         self.w.btn_copy_left.pressed.connect(self.parent.copy_file)
         self.w.btn_delete.pressed.connect(self.parent.delete_file)

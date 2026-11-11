@@ -1635,6 +1635,9 @@
                        <height>30</height>
                       </size>
                      </property>
+                     <property name="focusPolicy">
+                      <enum>Qt::ClickFocus</enum>
+                     </property>
                      <property name="text">
                       <string/>
                      </property>
@@ -2456,6 +2459,34 @@ P</string>
                        <property name="rightMargin">
                         <number>0</number>
                        </property>
+                       <item alignment="Qt::AlignHCenter">
+                        <widget class="QPushButton" name="btn_hide_usb">
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="minimumSize">
+                          <size>
+                           <width>30</width>
+                           <height>30</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>30</width>
+                           <height>30</height>
+                          </size>
+                         </property>
+                         <property name="focusPolicy">
+                          <enum>Qt::ClickFocus</enum>
+                         </property>
+                         <property name="text">
+                          <string/>
+                         </property>
+                        </widget>
+                       </item>
                        <item>
                         <spacer name="verticalSpacer_5">
                          <property name="orientation">
@@ -2534,7 +2565,7 @@ P</string>
                           <enum>Qt::NoFocus</enum>
                          </property>
                          <property name="toolTip">
-                          <string>Copt file from right to left</string>
+                          <string>Copy file from right to left</string>
                          </property>
                          <property name="text">
                           <string/>
@@ -5283,7 +5314,7 @@ TO FILE</string>
                        <number>2</number>
                       </property>
                       <property name="text">
-                       <string>11:16:10 AM</string>
+                       <string>09:14:05 AM</string>
                       </property>
                       <property name="alignment">
                        <set>Qt::AlignCenter</set>
@@ -9426,6 +9457,9 @@ ACTIVE</string>
                    <height>50</height>
                   </size>
                  </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::ClickFocus</enum>
+                 </property>
                  <property name="toolTip">
                   <string>Set to Manual mode</string>
                  </property>
@@ -9476,7 +9510,7 @@ ACTIVE</string>
                   <number>0</number>
                  </property>
                  <property name="true_python_cmd_string" stdset="0">
-                  <string>INSTANCE.stackedWidget_gcode.setCurrentIndex(0)</string>
+                  <string>INSTANCE.stacked_gcode.setCurrentIndex(0)</string>
                  </property>
                  <property name="false_python_cmd_string" stdset="0">
                   <string/>
@@ -9553,6 +9587,9 @@ ACTIVE</string>
                    <width>16777215</width>
                    <height>50</height>
                   </size>
+                 </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::ClickFocus</enum>
                  </property>
                  <property name="toolTip">
                   <string>Set to MDI mode</string>
@@ -9686,6 +9723,9 @@ ACTIVE</string>
                    <height>50</height>
                   </size>
                  </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::ClickFocus</enum>
+                 </property>
                  <property name="toolTip">
                   <string>Set to Auto mode</string>
                  </property>
@@ -9733,7 +9773,7 @@ ACTIVE</string>
                   <number>0</number>
                  </property>
                  <property name="true_python_cmd_string" stdset="0">
-                  <string>INSTANCE.stackedWidget_gcode.setCurrentIndex(0)</string>
+                  <string>INSTANCE.stacked_gcode.setCurrentIndex(0)</string>
                  </property>
                  <property name="false_python_cmd_string" stdset="0">
                   <string/>
@@ -14694,11 +14734,11 @@ SPEED</string>
   <slot>chk_enable_spindle_changed()</slot>
  </slots>
  <buttongroups>
-  <buttongroup name="page_buttonGroup"/>
   <buttongroup name="preset_buttonGroup">
    <property name="exclusive">
     <bool>false</bool>
    </property>
   </buttongroup>
+  <buttongroup name="page_buttonGroup"/>
  </buttongroups>
 </ui>
