@@ -356,7 +356,7 @@ class HandlerClass:
         pin.value_changed.connect(lambda data: self.w.lbl_modbus_errors.setText(str(data)))
         QHAL.newpin("spindle-inhibit", QHAL.HAL_BOOL, QHAL.HAL_OUT)
         # external offset control pins
-        QHAL.newpin("eoffset-count", QHAL.HAL_SINT, QHAL.HAL_OUT)
+        QHAL.newpin("eoffset-count", QHAL.HAL_REAL, QHAL.HAL_OUT)
         pin = QHAL.newpin("eoffset-value", QHAL.HAL_REAL, QHAL.HAL_IN)
         pin.value_changed.connect(self.eoffset_value_changed)
         # Z level compensation
@@ -529,6 +529,10 @@ class HandlerClass:
         self.w.gcodeeditor.editor.setCaretForegroundColor(Qt.yellow)
         self.w.gcodeeditor.gCodeLexerAction.setVisible(False)
         self.w.gcodeeditor.pythonLexerAction.setVisible(False)
+        # make toolbar buttons larger
+        for item in ['new', 'open', 'save', 'exit']:
+            btn = self.w.gcodeeditor.toolBar.widgetForAction(self.w.gcodeeditor[f"{item}Action"])
+            btn.setFixedSize(70, 40)
         # instance patch editor actions
         self.w.gcodeeditor.exitAction.disconnect()
         self.w.gcodeeditor.openReturn = self.openReturn
@@ -1170,7 +1174,7 @@ class HandlerClass:
             ACTION.OPEN_PROGRAM(self.last_loaded_program)
 
     def pause_spindle(self):
-        self.h['eoffset-count'] = int(self.w.lineEdit_spindle_raise.text())
+        self.h['eoffset-count'] = float(self.w.lineEdit_spindle_raise.text())
         self.h['spindle-inhibit'] = True
         self.w.btn_pause.setEnabled(False)
         self.add_status(f"Spindle paused at {self.w.lineEdit_runtime.text()}")
@@ -1621,9 +1625,6 @@ class HandlerClass:
             self.update_tool_info(tool)
             self.add_status(f"Tool {tool} loaded")
 
-    def btn_unload_tool_pressed(self):
-        ACTION.CALL_MDI_WAIT('M61 Q0 G43', mode_return=True)
-
     # STATUS tab
     def btn_clear_status_clicked(self):
         STATUS.emit('update-machine-log', None, 'DELETE')
@@ -1895,6 +1896,7 @@ class HandlerClass:
         if self.zlevel is not None:
             self.w.btn_enable_comp.setEnabled(not state)
         self.w.widget_main_menu.setEnabled(not state)
+        self.w.cmb_program_history.setEnabled(not state)
         self.w.btn_goto_sensor.setEnabled(not state)
         self.w.btn_goto_zero.setEnabled(not state)
         self.w.btn_goto_home.setEnabled(not state)
@@ -1908,13 +1910,10 @@ class HandlerClass:
             self.w.main_tab_widget.setCurrentIndex(TAB_MAIN)
             self.w.cmb_program_history.setEnabled(False)
             self.w.gcode_viewer.readOnlyMode()
-            self.w.stacked_gcode.setCurrentIndex(0)
             if self.macros_open:
                 self.toggle_macros()
-        else:
-            i = 1 if STATUS.is_mdi_mode() else 0
-            self.w.stacked_gcode.setCurrentIndex(i)
-            self.w.cmb_program_history.setEnabled(i == 0)
+        if not STATUS.is_mdi_mode():
+            self.mdiPanel.hide()
 
     def enable_onoff(self, state):
         text = "ON" if state else "OFF"

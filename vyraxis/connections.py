@@ -45,7 +45,6 @@ class Connections():
         self.w.btn_add_tool.pressed.connect(self.parent.btn_add_tool_pressed)
         self.w.btn_delete_tool.pressed.connect(self.parent.btn_delete_tool_pressed)
         self.w.btn_load_tool.pressed.connect(self.parent.btn_load_tool_pressed)
-        self.w.btn_unload_tool.pressed.connect(self.parent.btn_unload_tool_pressed)
         self.w.btn_db_help.pressed.connect(lambda: self.parent.setup_utils.show_help(self.parent.db_helpfile))
         # graphic display buttons
         self.w.btn_alpha_mode.clicked.connect(lambda state: self.w.gcodegraphics.set_alpha_mode(state))

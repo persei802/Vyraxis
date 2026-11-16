@@ -33,7 +33,7 @@
    </size>
   </property>
   <property name="windowTitle">
-   <string>QT Dragon 2.2</string>
+   <string>Vyraxis 1.0</string>
   </property>
   <property name="autoFillBackground">
    <bool>false</bool>
@@ -1662,13 +1662,13 @@
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
-                     <height>0</height>
+                     <height>58</height>
                     </size>
                    </property>
                    <property name="maximumSize">
                     <size>
                      <width>16777215</width>
-                     <height>60</height>
+                     <height>58</height>
                     </size>
                    </property>
                    <layout class="QHBoxLayout" name="horizontalLayout_3">
@@ -1690,7 +1690,7 @@
                     <item>
                      <widget class="QPushButton" name="btn_alpha_mode">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -1698,13 +1698,13 @@
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -1722,7 +1722,7 @@ MODE</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_clear">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -1730,19 +1730,13 @@ MODE</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -1811,7 +1805,7 @@ PATH</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_zoom_out">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -1819,19 +1813,13 @@ PATH</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="text">
@@ -1900,7 +1888,7 @@ OUT</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_zoom_in">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -1908,19 +1896,13 @@ OUT</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="text">
@@ -1989,7 +1971,7 @@ IN</string>
                     <item>
                      <widget class="QPushButton" name="btn_dimensions">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -1997,13 +1979,13 @@ IN</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -2027,7 +2009,7 @@ DIMENSIONS</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_view_x">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -2035,19 +2017,13 @@ DIMENSIONS</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -2113,7 +2089,7 @@ X</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_view_y">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -2121,19 +2097,13 @@ X</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -2199,7 +2169,7 @@ Y</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_view_z">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -2207,19 +2177,13 @@ Y</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -2285,7 +2249,7 @@ Z</string>
                     <item>
                      <widget class="ActionButton" name="actionbutton_view_p">
                       <property name="sizePolicy">
-                       <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                       <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
                         <verstretch>0</verstretch>
                        </sizepolicy>
@@ -2293,19 +2257,13 @@ Z</string>
                       <property name="minimumSize">
                        <size>
                         <width>0</width>
-                        <height>50</height>
+                        <height>0</height>
                        </size>
                       </property>
                       <property name="maximumSize">
                        <size>
                         <width>16777215</width>
-                        <height>50</height>
-                       </size>
-                      </property>
-                      <property name="baseSize">
-                       <size>
-                        <width>60</width>
-                        <height>40</height>
+                        <height>16777215</height>
                        </size>
                       </property>
                       <property name="toolTip">
@@ -4084,7 +4042,7 @@ G5X</string>
                        </size>
                       </property>
                       <property name="toolTip">
-                       <string>Add new tool as specied in diagram</string>
+                       <string>Add new tool to tool table</string>
                       </property>
                       <property name="text">
                        <string>ADD
@@ -4113,7 +4071,7 @@ TOOL</string>
                        </size>
                       </property>
                       <property name="toolTip">
-                       <string>Delete current selected tool</string>
+                       <string>Delete checked tool from tool table</string>
                       </property>
                       <property name="text">
                        <string>DELETE
@@ -4142,7 +4100,7 @@ TOOL</string>
                        </size>
                       </property>
                       <property name="toolTip">
-                       <string>Load current selected tool in spindle</string>
+                       <string>Load checked tool in spindle</string>
                       </property>
                       <property name="text">
                        <string>LOAD
@@ -4151,7 +4109,7 @@ TOOL</string>
                      </widget>
                     </item>
                     <item>
-                     <widget class="QPushButton" name="btn_unload_tool">
+                     <widget class="ActionButton" name="btn_unload_tool">
                       <property name="sizePolicy">
                        <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                         <horstretch>0</horstretch>
@@ -4171,11 +4129,17 @@ TOOL</string>
                        </size>
                       </property>
                       <property name="toolTip">
-                       <string>Unload tool from spindle</string>
+                       <string>Remove tool from spindle</string>
                       </property>
                       <property name="text">
                        <string>UNLOAD
 TOOL</string>
+                      </property>
+                      <property name="mdi_command_action" stdset="0">
+                       <bool>true</bool>
+                      </property>
+                      <property name="command_text_string" stdset="0">
+                       <string>M61 Q0 G43</string>
                       </property>
                      </widget>
                     </item>
@@ -5314,7 +5278,7 @@ TO FILE</string>
                        <number>2</number>
                       </property>
                       <property name="text">
-                       <string>09:14:05 AM</string>
+                       <string>07:48:16 AM</string>
                       </property>
                       <property name="alignment">
                        <set>Qt::AlignCenter</set>
@@ -14734,11 +14698,11 @@ SPEED</string>
   <slot>chk_enable_spindle_changed()</slot>
  </slots>
  <buttongroups>
+  <buttongroup name="page_buttonGroup"/>
   <buttongroup name="preset_buttonGroup">
    <property name="exclusive">
     <bool>false</bool>
    </property>
   </buttongroup>
-  <buttongroup name="page_buttonGroup"/>
  </buttongroups>
 </ui>
