@@ -39,7 +39,6 @@ class Common():
         self.gcode.append("M9")
         self.gcode.append("M5")
         self.gcode.append("M2")
-        self.gcode.append("%")
 
     def check_float_blanks(self, items):
         for name in items:

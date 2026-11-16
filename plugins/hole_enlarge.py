@@ -35,7 +35,7 @@ PLUGIN_INFO = {
     'mod_name' : 'hole_enlarge',
     'class_name' : 'Hole_Enlarge',
     'item_text' : 'HOLE ENLARGE',
-    'version' : '2.0',
+    'version' : '2.1',
     'description' : '''Hole Enlarge GCode generator
 Create spiral toolpaths for enlarging a hole from a start diameter to end diameter
 Programmable number of spiral loops to control stepover
@@ -227,7 +227,6 @@ class Hole_Enlarge(QDialog, Common):
         comment = self.lineEdit_comment.text()
         unit_code = 'G21' if INFO.MACHINE_IS_METRIC else 'G20'
         # opening preamble
-        self.gcode.append("%")
         self.gcode.append(f"({comment})")
         self.gcode.append(f"(Start diameter is {self.start_dia})")
         self.gcode.append(f"(Final diameter is {self.final_dia})")

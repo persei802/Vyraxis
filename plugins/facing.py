@@ -256,7 +256,6 @@ class Facing(QDialog, Common):
         unit_code = 'G21' if INFO.MACHINE_IS_METRIC else 'G20'
         units_text = 'Metric' if INFO.MACHINE_IS_METRIC else 'Imperial'
         # opening preamble
-        self.gcode.append("%")
         self.gcode.append(f"({comment})")
         self.gcode.append(f"(**NOTE - All units are {units_text})")
         self.gcode.append(f"(Area: X {self.size_x} by Y {self.size_y})")

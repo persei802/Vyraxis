@@ -30,7 +30,7 @@ PLUGIN_INFO = {
     'mod_name' : 'custom_macros',
     'class_name' : 'CustomMacros',
     'item_text' : 'CUSTOM MACROS',
-    'version' : '2.0',
+    'version' : '2.1',
     'description' : '''Custom Macros
 Create user defined macro buttons that can be modified at runtime
 Macro buttons created in the INI file are not affected

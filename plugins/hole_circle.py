@@ -37,7 +37,7 @@ PLUGIN_INFO = {
     'mod_name' : 'hole_circle',
     'class_name' : 'Hole_Circle',
     'item_text' : 'HOLE CIRCLE',
-    'version' : '2.0',
+    'version' : '2.1',
     'description' : '''Hole Circle GCode generator
 Create drilling toolpaths for a circular array of holes
 Circle center can be set to an arbitrary location
@@ -231,7 +231,6 @@ class Hole_Circle(QDialog, Common):
         unit_code = 'G21' if INFO.MACHINE_IS_METRIC else 'G20'
         units_text = 'Metric' if INFO.MACHINE_IS_METRIC else 'Imperial'
         # opening preamble
-        self.gcode.append('%')
         self.gcode.append(f'({comment})')
         self.gcode.append(f'({self.num_holes} Holes on {self.radius * 2} Diameter)')
         self.gcode.append(f'(**NOTE - All units are {units_text})')

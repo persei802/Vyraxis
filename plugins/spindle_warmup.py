@@ -36,7 +36,7 @@ PLUGIN_INFO = {
     'mod_name' : 'spindle_warmup',
     'class_name' : 'Spindle_Warmup',
     'item_text' : 'SPINDLE WARMUP',
-    'version' : '2.0',
+    'version' : '2.1',
     'description' : '''Spindle Warmup GCode generator
 Create a program that turns on the spindle
 Set a number of steps and total spindle ON time
@@ -211,7 +211,6 @@ class Spindle_Warmup(QDialog, Common):
         self.gcode = []
         comment = self.lineEdit_comment.text()
         # opening preamble
-        self.gcode.append("%")
         self.gcode.append(f"({comment})")
         self.gcode.append(f"(Warm up duration is {self.duration} minutes in {self.steps} steps)")
         self.gcode.append("G40 G49 G64 P0.03")
@@ -226,7 +225,6 @@ class Spindle_Warmup(QDialog, Common):
         self.gcode.append("M9")
         self.gcode.append("M5")
         self.gcode.append("M2")
-        self.gcode.append("%")
 
     # required code for subscriptable objects
     def __getitem__(self, item):

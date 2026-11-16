@@ -54,7 +54,7 @@ PLUGIN_INFO = {
     'mod_name' : 'zlevel',
     'class_name' : 'ZLevel',
     'item_text' : 'ZLEVEL COMPENSATION',
-    'version' : '2.0',
+    'version' : '2.1',
     'description' : '''Z Level Probing GCode generator
 Create Z probing routines for XY plane
 Display probed results as a surface map with contour lines
@@ -585,7 +585,6 @@ class ZLevel(QDialog, Common):
             y_start = 0 if zref == 3 or zref == 4 else -self.size_y
         unit_code = "G21" if INFO.MACHINE_IS_METRIC else "G20"
         # opening preamble
-        self.gcode.append("%")
         self.gcode.append(f"({self.lineEdit_comment.text()})")
         self.gcode.append(f"(Area: X {self.size_x} by Y {self.size_y})")
         self.gcode.append(f"(Steps: X {self.steps_x} by Y {self.steps_y})")
@@ -614,7 +613,6 @@ class ZLevel(QDialog, Common):
         self.gcode.append("(PROBECLOSE)")
         # closing section
         self.gcode.append("M2")
-        self.gcode.append("%")
 
     def validate(self):
         if not self.check_int_blanks(self.int_inputs): return False
