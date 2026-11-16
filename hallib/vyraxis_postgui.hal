@@ -1,9 +1,9 @@
 loadrt time
 loadrt and2
-loadrt scaled_sint_sums
+loadrt sum2
 addf time.0 servo-thread
 addf and2.0 servo-thread
-addf scaled-sint-sums.0 servo-thread
+addf sum2.0 servo-thread
 
 # the unlink pin commands are only used because they are connected 
 # in core_sim.hal and gantrysim.hal and this file is only for simulation
@@ -54,12 +54,11 @@ net compensate-on    vyraxis.comp_state-led
 setp compensate.scale 1000
 
 # eoffset summing
-net eoffset-count    scaled-sint-sums.0.in0   <= vyraxis.eoffset-count
-net comp-count       scaled-sint-sums.0.in1   <= compensate.z-offset
-net zaxis-eoffset    scaled-sint-sums.0.out-s => axis.z.eoffset-counts
-setp scaled-sint-sums.0.in2 0
-setp scaled-sint-sums.0.in3 0
-setp scaled-sint-sums.0.scale0 1000
+net eoffset-count     sum2.0.in0  <= vyraxis.eoffset-count
+net comp-count        sum2.0.in1  <= compensate.z-offset
+net zaxis-eoffset     sum2.0.out  => axis.z.eoffset-counts
+setp sum2.0.gain0 1000
+setp sum2.0.offset 0
 
 # mux4 selects for MPG scales
 #net scale_0          vyraxis.scale-sel0 => mux4.0.sel0

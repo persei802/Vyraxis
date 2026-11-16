@@ -118,7 +118,7 @@ class HALComp:
         self.h.newpin("enable", hal.Type.BOOL, hal.HAL_IN)
         self.h.newpin("clear", hal.Type.BOOL, hal.HAL_OUT)
         self.h.newpin("scale", hal.Type.SINT, hal.HAL_IN)
-        self.h.newpin("z-offset", hal.Type.SINT, hal.HAL_OUT)
+        self.h.newpin("z-offset", hal.Type.REAL, hal.HAL_OUT)
         self.h.ready()
         self.map = SurfaceMap()
         self.stat = linuxcnc.stat()
@@ -146,7 +146,7 @@ class HALComp:
                             x = self.stat.position[0] - self.stat.g5x_offset[0] - self.stat.g92_offset[0]
                             y = self.stat.position[1] - self.stat.g5x_offset[1] - self.stat.g92_offset[1]
                             offset = self.map.interpolate(x, y)
-                            self.h["z-offset"] = int(offset * self.h["scale"])
+                            self.h["z-offset"] = float(offset * self.h["scale"])
                         else:
                             self.h["z-offset"] = 0
                     else:
