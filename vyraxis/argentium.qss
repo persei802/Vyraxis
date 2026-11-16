@@ -442,6 +442,7 @@ QPushButton {
 }
 
 QPushButton:disabled,
+QToolButton:disabled,
 QPushButton:checked:disabled {
   color: #808080;
 }

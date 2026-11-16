@@ -256,7 +256,7 @@ QPushButton:hover, QToolButton:hover, QTabBar::tab:hover {
   color: #e6edf4;
 }
 
-QPushButton:disabled, QPushButton:checked:disabled {
+QPushButton:disabled, QPushButton:checked:disabled, QToolButton:disabled {
   background: #181e26;
   border-color: #252e3a;
   color: #59667a;
